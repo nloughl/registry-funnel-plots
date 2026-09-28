@@ -1,0 +1,222 @@
+---
+title: "Registry funnel plots: `r params$procedure` `r params$time_yr`-year revision"
+author: "Naomi Loughlin"
+date: "`r format(Sys.Date())`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    code_folding: hide
+params:
+  data_dir: "../regitry-outlier-detection/outputs/UKA"   # regextract outputs
+  procedure: "UKA"
+  time_yr: 3                     # time point shared by all registries (1, 3, 5, 10 ...)
+  levels: [0.95, 0.998]          # control-limit levels available to the plots
+  limit_method: "normal"         # "normal" (as v1) or "exact" (binomial, Spiegelhalter 2005)
+  y_scale: "difference"          # "difference" (mean = 0) or "ratio" (mean = 1)
+  families: ["Oxford", "ZUK / Physica ZUK", "Journey", "BalanSys"]   # device-family plots to draw
+  out_dir: "figures"
+  save_png: true
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE, fig.width = 10, fig.height = 6)
+library(dplyr)
+library(ggplot2)
+for (f in list.files("R", pattern = "\\.R$", full.names = TRUE)) source(f)
+
+P <- params
+LEVELS <- unlist(P$levels)
+T_YR <- P$time_yr
+save_fig <- function(p, slug, ...) if (isTRUE(P$save_png)) save_plot(p, paste0(tolower(P$procedure), "_", T_YR, "yr_", slug), P$out_dir, ...)
+```
+
+# Data
+
+```{r load}
+ext <- load_extraction(P$data_dir, P$procedure)
+families  <- load_families("config/device_families.csv")
+overrides <- readr::read_csv("config/registry_means_override.csv", comment = "#", show_col_types = FALSE)
+
+means  <- registry_means(ext$device, ext$casemix, T_YR, overrides)
+points <- device_points(ext$device, means, T_YR, families) |>
+  classify_points(LEVELS, P$limit_method)
+
+unverified <- unique(points$registry[points$verification %in% "unverified"])
+source_note <- paste0(
+  "Limits: ", P$limit_method, " approximation. Source: registry annual reports (",
+  paste(sprintf("%s %s", means$registry, means$report_year), collapse = ", "), ")",
+  if (length(unverified)) paste0(". Not yet verified: ", paste(unverified, collapse = ", ")) else "") |>
+  strwrap(width = 150) |> paste(collapse = "\n")
+```
+
+Devices with a `r T_YR`-year estimate per registry:
+
+```{r data_summary}
+points |>
+  count(registry, name = "devices") |>
+  left_join(means, by = "registry") |>
+  transmute(registry, report_year, metric_type, devices,
+            mean = scales::percent(p_ref, 0.01), n_total = scales::comma(n_total), mean_source) |>
+  knitr::kable()
+```
+
+`mean_source` shows where each registry mean comes from. Priority order:
+
+1. A manual override in `config/registry_means_override.csv`.
+2. The registry's own summary row (TOTAL / "All ..." / national average), n-weighted if there are several.
+3. Pooled case-mix subtotals.
+4. As a **fallback**, the n-weighted mean of the listed devices.
+
+Metrics differ between registries (`metric_type`): AOANJRR/LROI report CPR, NJR/EPRD 1−KM, SIRIS failure rate.
+Standardising each registry to its own mean removes level differences between registries. It does not remove differences in how each registry defines revision or who it includes.
+
+# Control limits
+
+For a registry mean rate $p_0$ and volume $n$, the `r paste(level_label(LEVELS), collapse = " / ")` limits are
+
+* **normal**: $p_0 \pm z\sqrt{p_0(1-p_0)/n}$ (v1 method);
+* **exact**: binomial quantiles with Spiegelhalter's (2005) interpolation, which is better calibrated when $n p_0$ is small.
+
+The width always uses the registry's own $p_0$. Standardising (`y_scale`) moves every registry's centre to 0 (difference) or 1 (ratio) so that registries can be overlaid.
+This treats the KM estimate at `r T_YR` years as a binomial proportion and ignores censoring, so the limits are approximate. This matters most when few implants remain at risk.
+
+```{r limits}
+n_max_all  <- max(points$n_total, na.rm = TRUE) * 1.1
+N_FLOOR    <- min(points$n_total, na.rm = TRUE)   # smallest device volume: funnels are shown down to here
+reg_refs   <- means |> transmute(registry, p_ref, n_max = n_max_all)
+reg_curves <- build_limit_curves(reg_refs, LEVELS, P$limit_method)
+```
+
+# Plot catalogue
+
+Every figure is one row in `plots` below. Each row holds a slug (the file name), a size and a function that returns the ggplot.
+To add a variation, add a row that calls one of the functions in `R/plots.R`, usually `funnel_plot()` with other options (`levels`, `sides`, `y`, `facet`, `x_log`, `ribbon`, `label_filter`, ...).
+
+```{r catalogue}
+# Axis ranges are worked out per plot (dynamic_ranges() in R/plots.R): every device is inside the
+# window and both sides of each funnel are visible down to N_FLOOR. Pass xlim/ylim to override.
+std_sub <- sprintf("Each registry's mean %d-yr revision set to %s; limits use the registry's own mean",
+                   T_YR, if (P$y_scale == "ratio") "1" else "0")
+title <- function(...) paste0(P$procedure, " ", T_YR, "-year revision: ", ...)
+
+plots <- tibble::tribble(
+  ~slug, ~section, ~width, ~height, ~make,
+
+  "registry_panels", "Registry means and limits", 11, 7, function()
+    plot_registry_panels(reg_curves, means, LEVELS, y = P$y_scale, n_floor = N_FLOOR,
+      title = title("registry control limits"),
+      subtitle = paste0(paste(level_label(LEVELS), collapse = " and "), " limits; ", std_sub),
+      caption = source_note),
+
+  "overlay_both_levels", "Standardised overlay", 10, 6, function()
+    plot_standardised_overlay(reg_curves, means, LEVELS, y = P$y_scale, n_floor = N_FLOOR,
+      title = title("control limits after standardising registry means"),
+      subtitle = std_sub, caption = source_note),
+
+  "overlay_95", "Standardised overlay", 10, 6, function()
+    plot_standardised_overlay(reg_curves, means, 0.95, y = P$y_scale, n_floor = N_FLOOR,
+      title = title("95% control limits"), subtitle = std_sub, caption = source_note),
+
+  "overlay_998", "Standardised overlay", 10, 6, function()
+    plot_standardised_overlay(reg_curves, means, 0.998, y = P$y_scale, n_floor = N_FLOOR,
+      title = title("99.8% control limits"), subtitle = std_sub, caption = source_note),
+
+  "overlay_998_upper", "Standardised overlay", 10, 6, function()
+    plot_standardised_overlay(reg_curves, means, 0.998, y = P$y_scale, sides = "upper", n_floor = N_FLOOR,
+      title = title("99.8% upper limits"), subtitle = std_sub, caption = source_note),
+
+  "all_devices_998", "All devices", 12, 7, function()
+    plot_standardised_overlay(reg_curves, means, 0.998, points = points, y = P$y_scale,
+      label_filter = rlang::quo(funnel_status != "within 95%"),
+      title = title("all listed devices vs. their registry's 99.8% limits"),
+      subtitle = paste(std_sub, "| labelled: outside the 95% limits"), caption = source_note)
+)
+
+# one plot per device family, at each level
+fam_plots <- tidyr::crossing(family = unlist(P$families), level = LEVELS) |>
+  mutate(slug = paste0("family_", gsub("[^a-z0-9]+", "_", tolower(family)), "_", level * 1000),
+         section = "Device families", width = 10, height = 6,
+         make = purrr::map2(family, level, function(fam, lv) function()
+           plot_family(reg_curves, points, means, fam, lv, y = P$y_scale,
+             title = title(fam, " vs. registry ", level_label(lv), " limits"),
+             subtitle = std_sub, caption = source_note))) |>
+  select(slug, section, width, height, make)
+plots <- bind_rows(plots, fam_plots)
+```
+
+```{r render_catalogue, results = "asis", fig.width = 10, fig.height = 6}
+render_plots <- function(tbl) {
+  for (sec in unique(tbl$section)) {
+    cat("\n\n## ", sec, "\n\n", sep = "")
+    for (i in which(tbl$section == sec)) {
+      cat("\n\n### ", tbl$slug[i], "\n\n", sep = "")
+      p <- tbl$make[[i]]()
+      print(p)
+      save_fig(p, tbl$slug[i], width = tbl$width[i], height = tbl$height[i])
+    }
+  }
+}
+render_plots(plots)
+```
+
+# Devices outside the limits
+
+```{r outliers}
+points |>
+  filter(funnel_status != paste("within", level_label(min(LEVELS)))) |>
+  arrange(desc(dev)) |>
+  transmute(registry, device = label, n = scales::comma(n_total),
+            rate = scales::percent(p, 0.1), registry_mean = scales::percent(p_ref, 0.01),
+            difference = scales::percent(dev, 0.1), funnel_status) |>
+  knitr::kable()
+```
+
+# Case mix
+
+The strata are age-sex classes (e.g. "<55 Female"; one class per age group and sex), using AOANJRR Table KP22 and NJR Table 3.K6 (NJR split by unicondylar cemented vs uncemented/hybrid).
+Each class gets limits centred on its own `r T_YR`-year rate, and the rate is then set to 0. This shows how much the funnel width, and therefore the chance of flagging a device, depends on the patients a device is used in.
+
+```{r casemix_data}
+if (!is.null(ext$casemix)) {
+  strata <- casemix_strata(ext$casemix, T_YR, njr_level = "group")
+  cm_refs <- strata |> transmute(registry, design, sex, age_group, stratum, p_ref = p, n_max = n_max_all)
+  cm_curves <- build_limit_curves(cm_refs, LEVELS, P$limit_method)
+  strata |>
+    transmute(registry, design, class = paste(age_group, sex), n = scales::comma(n_total), rate = scales::percent(p, 0.1)) |>
+    knitr::kable()
+}
+```
+
+```{r casemix_plots, results = "asis"}
+if (!is.null(ext$casemix)) {
+  cm_regs <- unique(strata$registry)
+  cm_plots <- tidyr::crossing(level = LEVELS) |>
+    mutate(slug = paste0("casemix_panels_", level * 1000), section = "Case-mix strata",
+           width = 12, height = 7,
+           make = purrr::map(level, function(lv) function()
+             plot_casemix_panels(cm_curves, lv, y = P$y_scale, n_floor = N_FLOOR,
+               title = title("age-sex class limits (", level_label(lv), ")"),
+               subtitle = "Each age-sex class's own rate set to 0", caption = source_note)))
+  env_plots <- tidyr::crossing(family = c(NA, unlist(P$families)[1]), level = LEVELS) |>
+    mutate(slug = paste0("casemix_envelope_", ifelse(is.na(family), "", paste0(gsub("[^a-z0-9]+", "_", tolower(family)), "_")), level * 1000),
+           section = "Case-mix envelope", width = 10, height = 6,
+           make = purrr::map2(family, level, function(fam, lv) function() {
+             pts <- if (is.na(fam)) NULL else filter(points, family == fam, registry %in% cm_regs)
+             plot_casemix_envelope(cm_curves, reg_curves, means, lv, points = pts, y = P$y_scale,
+               n_floor = N_FLOOR,
+               title = title("case-mix envelope of ", level_label(lv), " limits",
+                             if (!is.na(fam)) paste0(", ", fam) else ""),
+               subtitle = "Shaded: range of limits across age-sex classes; line: registry-mean limit",
+               caption = source_note)
+           })) |>
+    select(slug, section, width, height, make)
+  render_plots(bind_rows(select(cm_plots, slug, section, width, height, make), env_plots))
+}
+```
+
+# Session
+
+```{r session}
+sessionInfo()
+```

@@ -1,0 +1,8 @@
+.Rproj.user
+.Rhistory
+.RData
+.Ruserdata
+*.html
+funnel_plots_files/
+figures/*.png
+Rplots.pdf

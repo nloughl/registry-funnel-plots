@@ -1,0 +1,11 @@
+# family,pattern  (regular expression matched against the registry's device label, case-insensitive;
+# first match wins, so put more specific patterns first)
+family,pattern
+Oxford,oxford
+ZUK / Physica ZUK,zuk
+Journey,journey
+BalanSys,balansys
+Persona,persona
+Restoris / Mako MCK,restoris|mako
+Sigma HP,sigma
+Triathlon,triathlon
