@@ -6,6 +6,10 @@
 
 load_extraction <- function(data_dir, procedure = "UKA") {
   read <- function(f) readr::read_csv(file.path(data_dir, f), show_col_types = FALSE, guess_max = 1e5)
+  # drop trademark signs (e.g. EPRD "SIGMA(TM)"): they break string handling in non-UTF-8 R sessions
+  clean <- function(d) dplyr::mutate(d, dplyr::across(dplyr::where(is.character),
+                                                      ~ gsub("\u2122", "", .x, fixed = TRUE, useBytes = TRUE)))
+  read <- function(f) clean(readr::read_csv(file.path(data_dir, f), show_col_types = FALSE, guess_max = 1e5))
   list(
     device  = read(paste0(procedure, "_long.csv")),
     casemix = if (file.exists(file.path(data_dir, paste0(procedure, "_casemix_long.csv"))))

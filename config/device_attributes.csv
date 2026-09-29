@@ -1,0 +1,39 @@
+# Rules that give each registry device row its fixation, bearing, femoral material and tibial type
+# (used by detail levels 2 and 3). Deterministic: for each attribute the FIRST matching rule wins.
+#
+# scope   row       - applies to the whole row (EPRD section headings, LROI cemented/uncemented tables)
+#         femoral   - matched against the femoral component name (or the whole label when the registry
+#                     gives one name, e.g. SIRIS)
+#         tibial    - same for the tibial component
+#         brand     - matched against the brand from device_families.csv (design knowledge only)
+# field   row scope: section, table_key or device_label. Other scopes ignore it.
+# source  stated    - printed in the registry report
+#         design    - general knowledge of the implant, used only with attribute_source = "design".
+#                     Check these before relying on them; a blank value means "not known".
+#
+# Fixation: femoral and tibial values are combined - equal -> that value; cementless + cemented -> hybrid.
+# If one component is unknown the row's fixation is unknown (excluded at levels 2 and 3).
+attribute,scope,field,pattern,value,source,note
+fixation,row,section,uncemented,cementless,stated,EPRD section heading
+fixation,row,section,hybrid,hybrid,stated,EPRD section heading
+fixation,row,section,cemented,cemented,stated,EPRD section heading
+fixation,row,table_key,uka_uncemented,cementless,stated,LROI K055 (uncemented table)
+fixation,row,table_key,uka_cemented,cemented,stated,LROI K054 (cemented table)
+fixation,row,device_label,cemented/hybrid,cemented/hybrid,stated,SIRIS 'Oxford cemented/hybrid' (not split by the registry)
+fixation,femoral,,cless|cementless|uncemented,cementless,stated,
+fixation,femoral,,\(ctd\)|cemented,cemented,stated,
+fixation,tibial,,cless|cementless|uncemented,cementless,stated,
+fixation,tibial,,\(ctd\)|cemented,cemented,stated,
+fixation,tibial,,^oxford partial knee$,cemented,design,NJR tibia named without fixation: the standard Oxford tibia is cemented
+fixation,brand,,^(ZUK / Physica ZUK|Journey|BalanSys|Persona|Restoris / Mako MCK|Sigma HP|Triathlon|MG Uni|Link Sled|MOTO|GMK Uni|Allegretto|Genesis Uni)$,cemented,design,cemented-only designs (verify)
+bearing,row,section,mobile bearing,mobile,stated,EPRD section heading
+bearing,row,section,fixed bearing,fixed,stated,EPRD section heading
+bearing,tibial,,\bfix(ed)?\b,fixed,stated,e.g. 'BalanSys Uni Fixed' / 'Oxford Fixed Lateral Tibia'
+bearing,brand,,^Oxford$,mobile,design,Oxford is mobile bearing unless a fixed tibia is named
+bearing,brand,,^(ZUK / Physica ZUK|Journey|Persona|Restoris / Mako MCK|Sigma HP|Triathlon|MG Uni|Link Sled|MOTO|GMK Uni|Allegretto|Genesis Uni)$,fixed,design,fixed-bearing designs (verify)
+material,femoral,,oxinium,Oxinium,stated,femoral bearing surface
+material,femoral,,tinbn,TiNbN,stated,
+material,femoral,,cocr,CoCr,stated,
+material,brand,,^(Oxford|ZUK / Physica ZUK|Persona|Sigma HP|Triathlon|Restoris / Mako MCK|MG Uni|Link Sled|GMK Uni|MOTO)$,CoCr,design,standard CoCr femur (verify)
+tibia,tibial,,all[- ]?poly,all-poly,stated,tibial construction
+tibia,tibial,,metal[- ]?backed,metal-backed,stated,

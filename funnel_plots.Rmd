@@ -15,6 +15,10 @@ params:
   limit_method: "normal"         # "normal" (as v1) or "exact" (binomial, Spiegelhalter 2005)
   y_scale: "difference"          # "difference" (mean = 0) or "ratio" (mean = 1)
   families: ["Oxford", "ZUK / Physica ZUK", "Journey", "BalanSys"]   # device-family plots to draw
+  detail_level: 0                # points in the main catalogue: 0 = rows as listed, 1 = brand, 2 = + fixation, 3 = + attribute
+  detail_levels: [1, 2, 3]       # levels compared in the "Detail levels" section
+  level3_attr: "bearing"         # level-3 attribute: "bearing", "material" (femoral) or "tibia" (all-poly / metal-backed)
+  attribute_source: "stated"     # "stated" = only details printed in the report; "design" = also general implant knowledge
   out_dir: "figures"
   save_png: true
 ---
@@ -38,8 +42,12 @@ ext <- load_extraction(P$data_dir, P$procedure)
 families  <- load_families("config/device_families.csv")
 overrides <- readr::read_csv("config/registry_means_override.csv", comment = "#", show_col_types = FALSE)
 
+attr_rules <- load_attribute_rules("config/device_attributes.csv")
+
 means  <- registry_means(ext$device, ext$casemix, T_YR, overrides)
-points <- device_points(ext$device, means, T_YR, families) |>
+rows   <- device_points(ext$device, means, T_YR, families) |>
+  derive_attributes(attr_rules, P$attribute_source)
+points <- pool_to_level(rows, P$detail_level, P$level3_attr) |>
   classify_points(LEVELS, P$limit_method)
 
 unverified <- unique(points$registry[points$verification %in% "unverified"])
@@ -50,6 +58,7 @@ source_note <- paste0(
   strwrap(width = 150) |> paste(collapse = "\n")
 ```
 
+Points in the main plot catalogue are at **`r level_title(P$detail_level, P$level3_attr)`** (see [Detail levels](#detail-levels)).
 Devices with a `r T_YR`-year estimate per registry:
 
 ```{r data_summary}
@@ -133,20 +142,59 @@ plots <- tibble::tribble(
       subtitle = paste(std_sub, "| labelled: outside the 95% limits"), caption = source_note)
 )
 
-# one plot per device family, at each level
+# one plot per device family, at each level; at the outlier level (99.8%) each plot also gets
+# an outlier report: devices above the upper limit and their cumulative excess revisions
+OUTLIER_LEVEL <- max(LEVELS)
+fam_tables <- function(fam, lv) {
+  if (lv != OUTLIER_LEVEL) return(NULL)
+  pts <- filter(points, family == fam)
+  out <- outlier_report(pts, lv, P$limit_method)
+  list(outliers = out, summary = outlier_summary(out, pts))
+}
 fam_plots <- tidyr::crossing(family = unlist(P$families), level = LEVELS) |>
   mutate(slug = paste0("family_", gsub("[^a-z0-9]+", "_", tolower(family)), "_", level * 1000),
          section = "Device families", width = 10, height = 6,
          make = purrr::map2(family, level, function(fam, lv) function()
            plot_family(reg_curves, points, means, fam, lv, y = P$y_scale,
              title = title(fam, " vs. registry ", level_label(lv), " limits"),
-             subtitle = std_sub, caption = source_note))) |>
-  select(slug, section, width, height, make)
+             subtitle = std_sub, caption = source_note)),
+         tables = purrr::map2(family, level, function(fam, lv) function() fam_tables(fam, lv))) |>
+  select(slug, section, width, height, make, tables)
 plots <- bind_rows(plots, fam_plots)
 ```
 
 ```{r render_catalogue, results = "asis", fig.width = 10, fig.height = 6}
+fmt_outliers <- function(out) {
+  out |>
+    transmute(Registry = registry, Device = label, `n (procedures)` = scales::comma(n_total),
+              `Rate (%)` = scales::percent(p, 0.01), `Registry mean (%)` = scales::percent(p_ref, 0.01),
+              `Upper limit (%)` = scales::percent(upper_limit, 0.01), `Delta p (% points)` = scales::percent(delta_p, 0.01),
+              `Excess (revisions)` = round(excess, 1))
+}
+fmt_summary <- function(sm) {
+  sm |>
+    transmute(Registry = registry, `Devices plotted` = n_devices, `Outlier devices` = n_outliers,
+              `Procedures with an outlier device (n)` = scales::comma(n_implants),
+              `Cumulative excess (revisions)` = round(cumulative_excess, 1))
+}
+outlier_log <- list()
+SUMMARY_DEFS <- paste0(
+  "\n\n**Only outlier devices are counted.** An *outlier device* is one whose revision rate is **above the upper ",
+  level_label(OUTLIER_LEVEL), " control limit of its own registry** at its own volume n. ",
+  "A device inside the funnel adds nothing to these metrics, even if its rate is above the registry mean. ",
+  "Devices below the lower limit (low outliers) are not counted either.  \n",
+  "*Outlier devices*: number of devices outside (above) the upper limit.  \n",
+  "*Procedures with an outlier device (n)* (unit: procedures/implants): the sum of n over the outlier devices only, ",
+  "i.e. how many patients received an outlier implant, revised or not. It measures exposure, not harm.  \n",
+  "*Cumulative excess* (unit: revisions): the sum over the outlier devices only of n x (device rate - registry mean). ",
+  "It is the approximate number of revisions above what the registry-mean rate would have given in those procedures.  \n",
+  "Example: a device with 10,000 procedures and a rate of 5.0%, in a registry with a mean of 4.0% and an upper limit at ",
+  "n = 10,000 of 4.6%, is an outlier (5.0% > 4.6%). It adds 10,000 procedures and 10,000 x 0.010 = 100 excess revisions. ",
+  "A device at 4.5% with the same n is above the mean but inside the limit, so it adds 0 to both.\n\n",
+  "These are screening numbers for generating hypotheses, not precise estimates of harm.\n\n")
+
 render_plots <- function(tbl) {
+  if (!"tables" %in% names(tbl)) tbl$tables <- vector("list", nrow(tbl))
   for (sec in unique(tbl$section)) {
     cat("\n\n## ", sec, "\n\n", sep = "")
     for (i in which(tbl$section == sec)) {
@@ -154,10 +202,149 @@ render_plots <- function(tbl) {
       p <- tbl$make[[i]]()
       print(p)
       save_fig(p, tbl$slug[i], width = tbl$width[i], height = tbl$height[i])
+      tb <- if (is.function(tbl$tables[[i]])) tbl$tables[[i]]() else NULL
+      if (!is.null(tb)) {
+        cat("\n\n**Outliers above the ", level_label(OUTLIER_LEVEL), " upper limit: ",
+            nrow(tb$outliers), "**\n\n", sep = "")
+        if (nrow(tb$outliers)) {
+          cat(knitr::kable(fmt_outliers(tb$outliers), align = "llrrrrrrr"), sep = "\n")
+        } else cat("None.\n")
+        cat("\n\n**Cumulative excess revision by registry (outlier devices only)**\n\n")
+        cat(knitr::kable(fmt_summary(tb$summary), align = "lrrrrr"), sep = "\n")
+        cat(SUMMARY_DEFS)
+        outlier_log[[tbl$slug[i]]] <<- mutate(tb$outliers, plot = tbl$slug[i])
+      }
     }
   }
 }
 render_plots(plots)
+```
+
+# Detail levels {#detail-levels}
+
+Registries list implants at different levels of detail. For example, NJR splits Oxford by peg and by femoral fixation, SIRIS splits it by fixation only, and LROI gives one cemented and one uncemented Oxford.
+To compare like with like, each registry's rows are pooled to a common level of detail. This follows the RSA approach (doi:10.2340/17453674.2026.45293), except that **rows without the needed detail are excluded** rather than moved to an "other" group:
+
+| Level | Point = | Rows excluded when |
+|---|---|---|
+| 1 | brand (`config/device_families.csv`) | brand not matched |
+| 2 | brand + fixation (cemented / cementless / hybrid) | fixation not known |
+| 3 | brand + fixation + `r P$level3_attr` | fixation or `r P$level3_attr` not known |
+
+Attributes come from the rules in `config/device_attributes.csv`:
+
+* **stated** rules use what the report prints: EPRD section headings, LROI's cemented/uncemented tables, and component names such as "Oxford (cless)", "Oxinium" or "All Poly".
+* **design** rules fill gaps from general knowledge of the implant, e.g. ZUK is cemented and fixed bearing, and Oxford is mobile bearing. They are used only when `attribute_source = "design"`. Check them before relying on them.
+
+A femoral and tibial component with different stated fixation (AOANJRR "Oxford (cless) / Oxford (ctd)") is *hybrid*. SIRIS does not split cemented from hybrid Oxford, so that row keeps its own *cemented/hybrid* category.
+Pooled points have $n = \sum n_i$ and $p = \sum n_i p_i / \sum n_i$, the n-weighted mean of the rows' `r T_YR`-year KM estimates. This is approximate because each row is censored differently, and pooled points have no CI. `[k]` after a label means k rows were pooled.
+This run uses **`r P$attribute_source`** attributes.
+
+```{r level_counts}
+lvl_counts <- level_counts(rows, attr_rules, unlist(P$detail_levels), P$level3_attr)
+lvl_counts |>
+  mutate(cell = sprintf("%d / %d (%s)", points, rows_kept, scales::percent(pct_procedures_kept, 1))) |>
+  select(attribute_source, level, registry, cell) |>
+  tidyr::pivot_wider(names_from = registry, values_from = cell) |>
+  arrange(desc(attribute_source == P$attribute_source), attribute_source, level) |>
+  knitr::kable(caption = paste0("Points / rows kept (share of procedures kept) at each level, ", T_YR,
+                                "-year rows. Rows per registry: ",
+                                paste(sprintf("%s %d", distinct(lvl_counts, registry, rows)$registry,
+                                              distinct(lvl_counts, registry, rows)$rows), collapse = ", ")))
+```
+
+```{r level_attributes}
+rows |>
+  transmute(registry, device = label, n = n_total, brand, fixation, fixation_source,
+            bearing, bearing_source, material, material_source, tibia, tibia_source) |>
+  arrange(registry, brand) |>
+  knitr::kable(caption = paste("Attributes of each registry row (", P$attribute_source, "rules)"))
+```
+
+```{r level_catalogue, results = "asis", fig.width = 12, fig.height = 7}
+lvl_points <- purrr::map(setNames(unlist(P$detail_levels), unlist(P$detail_levels)), function(lv)
+  pool_to_level(rows, lv, P$level3_attr) |> classify_points(LEVELS, P$limit_method))
+lvl_tables <- function(lv, fam = NULL) function() {
+  pts <- lvl_points[[as.character(lv)]]
+  if (!is.null(fam)) pts <- filter(pts, family == fam)
+  out <- outlier_report(pts, OUTLIER_LEVEL, P$limit_method)
+  list(outliers = out, summary = outlier_summary(out, pts))
+}
+lvl_slug <- function(lv) paste0("level", lv, "_", P$attribute_source,
+                                if (lv == 3) paste0("_", P$level3_attr) else "")
+lvl_plots <- tibble::tibble(level = unlist(P$detail_levels)) |>
+  mutate(slug = paste0(purrr::map_chr(level, lvl_slug), "_all_models_", OUTLIER_LEVEL * 1000),
+         section = "Detail levels: all models", width = 12, height = 7,
+         make = purrr::map(level, function(lv) function() {
+           pts <- lvl_points[[as.character(lv)]]
+           plot_standardised_overlay(filter(reg_curves, registry %in% pts$registry), filter(means, registry %in% pts$registry),
+             OUTLIER_LEVEL, points = pts, y = P$y_scale, x_log = TRUE,
+             label_filter = rlang::quo(funnel_status != paste("within", level_label(min(LEVELS)))),
+             title = title("all models at ", level_title(lv, P$level3_attr)),
+             subtitle = paste0(std_sub, " | ", P$attribute_source, " attributes | labelled: outside the ",
+                               level_label(min(LEVELS)), " limits"),
+             caption = source_note)
+         }),
+         tables = purrr::map(level, function(lv) lvl_tables(lv)))
+render_plots(select(lvl_plots, slug, section, width, height, make, tables))
+```
+
+**Device-family outliers at each detail level** (`r level_label(OUTLIER_LEVEL)` upper limit). This shows whether an outlier found at one level of detail persists when rows are pooled or split:
+
+```{r level_family_summary}
+fam_lvl <- purrr::imap_dfr(lvl_points, function(pts, lv) {
+  out <- outlier_report(pts, OUTLIER_LEVEL, P$limit_method)
+  pts |>
+    filter(family %in% unlist(P$families)) |>
+    group_by(family) |>
+    summarise(points = n(), registries = n_distinct(registry), .groups = "drop") |>
+    left_join(out |> group_by(family) |>
+                summarise(outliers = n(), outlier_points = paste(paste0(registry, ": ", label), collapse = "; "),
+                          cumulative_excess = round(sum(excess), 1), .groups = "drop"), by = "family") |>
+    mutate(level = as.integer(lv), outliers = coalesce(outliers, 0L), cumulative_excess = coalesce(cumulative_excess, 0))
+})
+fam_lvl |>
+  select(family, level, points, registries, outliers, cumulative_excess, outlier_points) |>
+  arrange(family, level) |>
+  knitr::kable()
+dir.create("tables", showWarnings = FALSE)
+purrr::imap_dfr(lvl_points, function(pts, lv) outlier_report(pts, OUTLIER_LEVEL, P$limit_method) |>
+                  mutate(level = as.integer(lv))) |>
+  select(level, registry, family, point = label, key, n_rows, device_label, n_total, p, p_ref, upper_limit,
+         delta_p, excess, detail_source, report_year, table_id, pdf_page) |>
+  mutate(attribute_source = P$attribute_source, level3_attr = P$level3_attr) |>
+  readr::write_csv(file.path("tables", sprintf("%s_%dyr_level_outliers_%s_%s.csv", tolower(P$procedure), T_YR,
+                                               P$attribute_source, OUTLIER_LEVEL * 1000)))
+```
+
+
+# Outlier reporting
+
+The device-family plots at the `r level_label(OUTLIER_LEVEL)` level each have two tables underneath.
+
+**Only outlier devices are counted.** An outlier is a device whose `r T_YR`-year rate is above the upper `r level_label(OUTLIER_LEVEL)` control limit of **its own registry** at its own volume $n$. A device inside the funnel contributes nothing to any metric below, even when its rate is above the registry mean. Low outliers (below the lower limit) are not counted either.
+
+1. **Outliers**: the list of outlier devices.
+2. **Summary by registry**, summed over outlier devices only:
+   * *Procedures with an outlier device* $= \sum n$, in procedures (implants). This is exposure: how many patients received an outlier implant, not how many were revised.
+   * *Cumulative excess* $= \sum n \times (p_{device} - p_{registry})$, in revisions. These are revisions above what the registry-mean rate would have produced.
+
+Here $n$ is the number of implants the registry lists for the device, and $p$ is its Kaplan-Meier revision estimate at `r T_YR` years, so the excess is an approximate count of revisions. These metrics are for screening and generating hypotheses, not for precise quantification of harm. All outlier rows are also written to `tables/`.
+
+```{r outlier_export}
+dir.create("tables", showWarnings = FALSE)
+if (length(outlier_log)) {
+  all_out <- bind_rows(outlier_log[grepl("^family_", names(outlier_log))]) |>
+    mutate(pdf_page = as.character(pdf_page)) |>
+    select(plot, family, registry, device = label, device_label, n_total, p, p_ref, upper_limit,
+           delta_p, excess, report_year, table_id, pdf_page)
+  readr::write_csv(all_out, file.path("tables", sprintf("%s_%dyr_family_outliers_%s.csv",
+                                                         tolower(P$procedure), T_YR, OUTLIER_LEVEL * 1000)))
+  all_out |>
+    group_by(family) |>
+    summarise(outliers = n(), procedures_with_outlier_device = sum(n_total), cumulative_excess = round(sum(excess), 1)) |>
+    knitr::kable(caption = paste("Summary across device families,", level_label(OUTLIER_LEVEL), "upper limit"))
+}
 ```
 
 # Devices outside the limits

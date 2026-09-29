@@ -1,5 +1,7 @@
 # family,pattern  (regular expression matched against the registry's device label, case-insensitive;
 # first match wins, so put more specific patterns first)
+# `family` is the BRAND used for detail level 1 (one point per brand per registry). Every device row
+# should match one line; rows that match nothing are dropped from the detail levels and listed in the report.
 family,pattern
 Oxford,oxford
 ZUK / Physica ZUK,zuk
@@ -9,3 +11,14 @@ Persona,persona
 Restoris / Mako MCK,restoris|mako
 Sigma HP,sigma
 Triathlon,triathlon
+AMC / Uniglide,uniglide
+MG Uni,^mg uni
+Preservation,preservation
+Genus,^genus
+Genesis Uni,genesis
+Link Sled,\bsled\b
+MOTO,\bmoto\b
+Univation,univation
+GMK Uni,\bgmk\b
+Allegretto,allegretto
+HLS Uni,\bhls\b

@@ -25,15 +25,73 @@ Figures are written to `figures/<procedure>_<t>yr_<slug>.png`.
 | `limit_method` | normal | `normal` (as v1) or `exact` (binomial with Spiegelhalter 2005 interpolation) |
 | `y_scale` | difference | `difference`: registry mean set to 0. `ratio`: registry mean set to 1 |
 | `families` | Oxford, ZUK, Journey, BalanSys | Device families that get their own plot |
+| `detail_level` | 0 | Points in the main catalogue: 0 = rows as listed, 1 = brand, 2 = + fixation, 3 = + attribute |
+| `detail_levels` | 1, 2, 3 | Levels compared in the "Detail levels" section |
+| `level3_attr` | bearing | Level-3 attribute: `bearing`, `material` (femoral) or `tibia` (all-poly / metal-backed) |
+| `attribute_source` | stated | `stated`: only details printed in the report. `design`: also fills gaps from implant knowledge |
+
+## Detail levels
+Registry rows are pooled within each registry to a common level of detail. This follows the RSA approach in doi:10.2340/17453674.2026.45293, but rows that lack the detail a level needs are **excluded**, not regrouped:
+
+| Level | One point per | Excluded when |
+|---|---|---|
+| 1 | brand (`config/device_families.csv`) | brand not matched |
+| 2 | brand + fixation (cemented / cementless / hybrid) | fixation unknown |
+| 3 | brand + fixation + bearing, femoral material or tibial type | either one unknown |
+
+- Attributes come from the rules in `config/device_attributes.csv`. For each attribute, the first matching rule wins.
+- `stated` rules read the report text: EPRD section headings, LROI's cemented/uncemented tables, and component names such as "(cless)", "Oxinium" or "All-Poly".
+- `design` rules are general implant knowledge, e.g. ZUK is cemented and fixed bearing, and the Oxford tibia is cemented and mobile bearing. They are marked *verify*.
+- A femoral and tibial component with different fixation is *hybrid*. SIRIS "Oxford cemented/hybrid" keeps its own category.
+- A pooled point has n = sum of the rows' n and p = the n-weighted mean of the rows' KM estimates. This is approximate, and pooled points have no CI.
+- The report's "Detail levels" section contains:
+  - a table of points / rows kept per registry and level, for both attribute sources
+  - the attributes of every row
+  - an all-models plot with outlier tables for each level
+  - a family × level outlier summary
+- The report also writes `tables/<proc>_<t>yr_level_outliers_<source>_998.csv`.
+
+## Interactive app
+```r
+install.packages(c("shiny", "bslib", "plotly"))   # once
+shiny::runApp("app")                              # from the repo root; opens in your browser
+```
+It runs only on your computer and uses the same `R/` functions as the report. The controls are:
+- **Follow-up year:** only years reported by at least 2 registries are listed. Registry means and device points both come from that year.
+- **Model:** a family from `config/device_families.csv`, or all models.
+- **Detail level:** as listed / 1 brand / 2 + fixation / 3 + attribute (pick bearing, femoral material or tibial type). You can also switch between stated attributes and stated + design knowledge. A note lists the rows excluded for missing detail, and a table at the bottom gives the rows kept per registry and level.
+- **Registries:** tick boxes, all on by default.
+- **Control limit:** 99.8%, 95%, or both.
+- **Funnel distribution:**
+  - Wald normal approximation.
+  - Exact binomial (Spiegelhalter).
+  - Overdispersion-adjusted. This widens each registry's limits by √φ, where φ is estimated from all of that registry's devices at that year using Spiegelhalter's multiplicative model with 10% winsorising.
+- **Funnel:** registry mean, or registry mean + a case-mix envelope. The envelope is the range of age-sex class limits, available for AOANJRR and NJR. Outliers are still judged against the registry mean.
+- **Layout:** registries overlaid after standardising (difference or ratio), or one panel per registry on the rate scale.
+
+Hover over a point to see:
+- n
+- the revision rate and its CI at that year
+- the registry mean, Δp and the limit
+- where the value came from (table and page)
+
+Points get a red ring above the upper limit and a green ring below the lower limit.
+
+Under the plot, the high-outlier table and the cumulative-excess summary update live. There are CSV downloads for both, and the camera icon on the plot saves a PNG.
+
+To read the data from a different folder, set `REGISTRY_DATA_DIR` before starting the app.
 
 ## Layout
 | File | Contents |
 |---|---|
 | `R/palette.R` | **Registry colours** (one fixed colour per registry), legend labels (`NJR: 3.21%, n = 206,689`), line types per level, theme |
 | `R/data.R` | Loads the CSVs, computes registry means, device points and case-mix strata |
-| `R/limits.R` | `funnel_limits()` (normal / exact), `build_limit_curves()`, `classify_points()` |
+| `R/limits.R` | `funnel_limits()` (normal / exact / overdispersed), `estimate_phi()`, `build_limit_curves()`, `classify_points()`, outlier reports |
+| `app/app.R` | Interactive Shiny app |
 | `R/plots.R` | `funnel_plot()` core function and the named variants |
-| `config/device_families.csv` | Regex that groups each registry's device labels into families (Oxford, ZUK, ...) |
+| `R/levels.R` | Detail levels: `derive_attributes()`, `pool_to_level()`, `level_counts()` |
+| `config/device_families.csv` | Regex that groups each registry's device labels into families/brands (Oxford, ZUK, ...) |
+| `config/device_attributes.csv` | Rules for fixation / bearing / material / tibia, each marked stated or design |
 | `config/registry_means_override.csv` | Optional hand-set registry means, e.g. from a table not yet extracted |
 
 ### Registry means
@@ -55,6 +113,14 @@ Axis windows are worked out for each plot by `dynamic_ranges()` in `R/plots.R`:
 
 ### Case mix
 Case-mix limits are drawn per **age-sex class**, e.g. `<55 Female` or `>=75 Male`. That gives 8 classes per registry or design block, in paired colours: one hue per age group, dark for female and light for male.
+
+### Outlier reporting
+Each device-family plot at 99.8% has two tables underneath:
+1. **Outliers:** the devices above their own registry's upper 99.8% limit at their own n.
+2. **Cumulative excess revision:** summed per registry and overall. It is Σ n × Δp, where Δp = device rate − registry mean. Only outlier devices count. These are screening numbers for generating hypotheses, not precise estimates.
+
+The functions are `outlier_report()` and `outlier_summary()` in `R/limits.R`. All outlier rows are also written to `tables/<proc>_<t>yr_family_outliers_998.csv`.
+To add tables under any other plot, give its row in the plot catalogue a `tables` function that returns `list(outliers, summary)`.
 
 ## Adding a plot
 Every figure is one row in the `plots` table in the "Plot catalogue" chunk of `funnel_plots.Rmd`. Each row has a slug, a section, a size and a function that returns a ggplot.
