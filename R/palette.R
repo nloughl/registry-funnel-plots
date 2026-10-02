@@ -22,22 +22,29 @@ registry_colour <- function(registries) {
   REGISTRY_COLOURS[unique(registries)]
 }
 
-#' Legend label per registry: "NJR: 3.21%, n = 206,689"
-registry_legend_labels <- function(means) {
+#' Legend label per registry: "NJR: 3.21%, n = 206,689" (the registry MEAN, whatever the reference);
+#' with ci = TRUE: "NJR: 3.21% (3.13-3.29%), n = 206,689"
+registry_legend_labels <- function(means, ci = FALSE) {
+  pm <- if ("p_mean" %in% names(means)) means$p_mean else means$p_ref
+  ci_txt <- if (ci && all(c("p_lcl", "p_ucl") %in% names(means)))
+    ifelse(is.na(means$p_lcl), " (no CI)", sprintf(" (%s-%s)", scales::number(means$p_lcl * 100, 0.01),
+                                                   scales::percent(means$p_ucl, 0.01))) else ""
   stats::setNames(
-    sprintf("%s: %s, n = %s", means$registry,
-            scales::percent(means$p_ref, accuracy = 0.01),
+    sprintf("%s: %s%s, n = %s", means$registry, scales::percent(pm, accuracy = 0.01), ci_txt,
             scales::comma(means$n_total)),
     means$registry
   )
 }
 
+#' Line types for the three references in reference-overlay plots.
+REFERENCE_LINETYPES <- c(mean = "solid", lcl = "22", ucl = "42")
+
 #' Colour scale keyed on the registry code, labelled with mean rate and n.
 #' Mapping colour to `registry` (not to the label text) keeps colours fixed whatever the labels say.
-scale_colour_registry <- function(means, name = "Registry (mean revision, n)", ...) {
+scale_colour_registry <- function(means, name = "Registry (mean revision, n)", ci = FALSE, ...) {
   regs <- means$registry
   ggplot2::scale_colour_manual(values = registry_colour(regs), breaks = regs,
-                               labels = registry_legend_labels(means)[regs], name = name, ...)
+                               labels = registry_legend_labels(means, ci = ci)[regs], name = name, ...)
 }
 
 scale_fill_registry <- function(means, name = "Registry (mean revision, n)", ...) {

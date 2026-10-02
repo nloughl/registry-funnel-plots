@@ -1,0 +1,22 @@
+# Harmonised model names for the rare joints (regex on the registry's device label, case-insensitive,
+# first match wins - put more specific patterns first). `family` is the name shown on plots and the unit
+# for family plots; the printed label is kept in `device_label`.
+joint,family,pattern
+ANKLE,Infinity / Inbone,infinity.*inbone
+ANKLE,Infinity,^infinity$
+ANKLE,Inbone,^inbone$
+ANKLE,BOX,^box$
+ANKLE,STAR,^(s\.t\.a\.r\.?|star)$
+ANKLE,Salto Talaris,^salto talaris$
+ANKLE,Salto,^salto$
+ANKLE,Hintegra,hintegra
+ANKLE,Hintermann Series H3,hintermann
+ANKLE,Mobility,mobility
+ANKLE,Zenith,zenith
+ANKLE,Vantage,vantage
+ANKLE,Trabecular Metal,trabecular
+ANKLE,Buechel-Pappas,buechel
+ELBOW,Coonrad-Morrey,coonrad
+ELBOW,Discovery,discovery
+ELBOW,Latitude,latitude
+ELBOW,Nexel,nexel

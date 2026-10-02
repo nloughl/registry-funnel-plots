@@ -1,4 +1,5 @@
 # Optional: fix a registry's reference rate by hand (e.g. from a table not yet extracted).
-# mean_pct in percent. Rows here take priority over everything computed from the extraction.
-# Example: AOANJRR,3,4.4,50481,"AOANJRR 2025 Table KP18 (all UKA, OA)"
-registry,time_yr,mean_pct,n_total,source
+# mean_pct, lcl_pct, ucl_pct in percent (CI optional - leave blank if unknown).
+# Rows here take priority over everything computed from the extraction.
+# Example: AOANJRR,3,4.4,4.2,4.6,50481,"AOANJRR 2025 Table KP18 (all UKA, OA)"
+registry,time_yr,mean_pct,lcl_pct,ucl_pct,n_total,source

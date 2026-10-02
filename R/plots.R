@@ -66,7 +66,7 @@ funnel_plot <- function(curves, points = NULL, means = NULL,
     p <- p + ggplot2::geom_point(data = points, pt_map, size = 2.3, inherit.aes = FALSE)
     if (has_risk) {
       p <- p + ggplot2::scale_shape_manual(values = c(`FALSE` = 16, `TRUE` = 1),
-                                           labels = c(`FALSE` = "", `TRUE` = "<=250 at risk"),
+                                           labels = c(`TRUE` = "<=250 at risk"),
                                            breaks = "TRUE", name = NULL, drop = TRUE)
     }
     if (label_points) {
@@ -140,6 +140,56 @@ plot_family <- function(curves, points, means, family, levels, ...) {
               dplyr::filter(means, registry %in% pts$registry), levels = levels, ...)
 }
 
+#' Reference grid: one row per reference (registry mean, lower / upper 95% CI of the mean), one column per
+#' registry. Every panel is standardised to its own reference (0 = that reference), so all funnels are
+#' symmetric about 0 (normal / overdispersed limits) and each point is plotted against the reference of its
+#' panel: a point outside a panel's funnel is an outlier under that reference.
+#' ref_curves: build_limit_curves(reference_refs(...)) - must have `reference` and `p0` columns.
+#' Points outside the funnel of their panel are labelled.
+plot_reference_grid <- function(ref_curves, means, level, points = NULL, y = "difference",
+                                n_floor = NULL, x_log = TRUE, ...) {
+  yc <- y_cols(y)
+  ref_lab <- c(mean = "Mean", lcl = "Lower CI", ucl = "Upper CI")
+  cv <- dplyr::filter(ref_curves, .data$level == !!level, registry %in% means$registry) |>
+    dplyr::mutate(reference = factor(reference, levels = names(ref_lab), labels = ref_lab))
+  pts <- NULL
+  if (!is.null(points) && nrow(points)) {
+    refs <- dplyr::distinct(cv, registry, reference, p0)
+    pts <- points |>
+      dplyr::select(-dplyr::any_of(c("dev", "ratio", "reference"))) |>
+      dplyr::inner_join(refs, by = "registry", relationship = "many-to-many") |>
+      dplyr::mutate(dev = p - p0, ratio = p / p0)
+    # outside this panel's funnel? (interpolate the panel's limit curve at the point's n)
+    pts$outside <- purrr::pmap_lgl(list(pts$registry, pts$reference, pts$n_total, pts[[yc$point]]),
+      function(rg, rf, n, yv) {
+        c1 <- cv[cv$registry == rg & cv$reference == rf, ]
+        yv > stats::approx(c1$n, c1[[yc$upper]], n, rule = 2)$y || yv < stats::approx(c1$n, c1[[yc$lower]], n, rule = 2)$y
+      })
+  }
+  p <- ggplot2::ggplot(cv, ggplot2::aes(x = n, colour = registry)) +
+    ggplot2::geom_line(ggplot2::aes(y = .data[[yc$upper]]), linewidth = 0.6) +
+    ggplot2::geom_line(ggplot2::aes(y = .data[[yc$lower]]), linewidth = 0.6) +
+    ggplot2::geom_hline(yintercept = yc$ref, linewidth = 0.4)
+  if (!is.null(pts)) {
+    p <- p + ggplot2::geom_point(data = pts, ggplot2::aes(x = n_total, y = .data[[yc$point]], shape = outside), size = 2.2) +
+      ggplot2::scale_shape_manual(values = c(`FALSE` = 16, `TRUE` = 17), labels = c(`FALSE` = "inside", `TRUE` = "outside"),
+                                  name = "Point vs funnel") +
+      ggrepel::geom_text_repel(data = dplyr::filter(pts, outside),
+                               ggplot2::aes(x = n_total, y = .data[[yc$point]], label = label),
+                               size = 2.5, show.legend = FALSE, max.overlaps = Inf, seed = 1, min.segment.length = 0)
+  }
+  rng <- dynamic_ranges(cv, pts, yc, "both", n_floor, x_log)
+  p + ggplot2::facet_grid(reference ~ registry) +
+    scale_colour_registry(means, ci = TRUE, name = "Registry (mean, 95% CI, n)") +
+    ggplot2::scale_y_continuous(labels = yc$fmt, breaks = scales::pretty_breaks(n = 6)) +
+    (if (x_log) ggplot2::scale_x_log10(labels = function(x) ifelse(x >= 1000, paste0(x / 1000, 'k'), x))
+     else ggplot2::scale_x_continuous(labels = scales::comma)) +
+    ggplot2::coord_cartesian(xlim = rng$x, ylim = rng$y) +
+    ggplot2::labs(x = "Procedure volume (n)", y = sub("registry mean", "reference", yc$lab), ...) +
+    theme_funnel() + ggplot2::theme(legend.position = "bottom", legend.box = "vertical") +
+    ggplot2::guides(colour = ggplot2::guide_legend(nrow = 2, title.position = "top"))
+}
+
 #' Case-mix: one set of limits per age-sex class (e.g. "<55 Female"), one panel per registry/design.
 #' Paired colours: one hue per age group, dark = female, light = male (registry colours are reserved).
 casemix_class_levels <- function() {
@@ -195,6 +245,45 @@ plot_casemix_envelope <- function(cm_curves, reg_curves, means, level, points = 
   p + scale_colour_registry(means) + scale_fill_registry(means, guide = "none") +
     ggplot2::scale_y_continuous(labels = yc$fmt) +
     ggplot2::scale_x_continuous(labels = scales::comma) +
+    ggplot2::coord_cartesian(xlim = rng$x, ylim = rng$y) +
+    ggplot2::labs(x = "Procedure volume (n)", y = yc$lab, ...) +
+    theme_funnel()
+}
+
+#' Procedure-period funnels: one funnel per period (e.g. LROI 2009-2010 ... 2021-2022), each built around
+#' that period's own revision rate, with the registry-mean funnel (dashed) and optional device points.
+#' y = "absolute": funnels and points at their true rates (the funnels shift with the period's rate).
+#' y = "difference" / "ratio": every period funnel centred on 0 / 1 (shows how the width changes);
+#'   points are then relative to the registry mean.
+plot_period_funnels <- function(period_curves, reg_curves, means, level, points = NULL, y = "absolute",
+                                n_floor = NULL, x_log = TRUE, label_points = TRUE, ...) {
+  yc <- y_cols(y)
+  cv <- dplyr::filter(period_curves, .data$level == !!level)
+  rc <- dplyr::filter(reg_curves, .data$level == !!level, registry %in% unique(cv$registry))
+  cols <- period_colours(levels(cv$period))
+  p <- ggplot2::ggplot(cv, ggplot2::aes(x = n, colour = period, group = period)) +
+    ggplot2::geom_line(ggplot2::aes(y = .data[[yc$upper]]), linewidth = 0.6) +
+    ggplot2::geom_line(ggplot2::aes(y = .data[[yc$lower]]), linewidth = 0.6) +
+    ggplot2::geom_line(data = rc, ggplot2::aes(x = n, y = .data[[yc$upper]]), colour = "black",
+                       linetype = "22", linewidth = 0.7, inherit.aes = FALSE) +
+    ggplot2::geom_line(data = rc, ggplot2::aes(x = n, y = .data[[yc$lower]]), colour = "black",
+                       linetype = "22", linewidth = 0.7, inherit.aes = FALSE)
+  if (is.na(yc$ref)) {
+    p <- p + ggplot2::geom_hline(yintercept = unique(rc$p0), colour = "black", linewidth = 0.4)
+  } else p <- p + ggplot2::geom_hline(yintercept = yc$ref, colour = "black", linewidth = 0.4)
+  if (!is.null(points) && nrow(points)) {
+    p <- p + ggplot2::geom_point(data = points, ggplot2::aes(x = n_total, y = .data[[yc$point]]),
+                                 colour = registry_colour(points$registry[1]), size = 2.3, inherit.aes = FALSE)
+    if (label_points) p <- p + ggrepel::geom_text_repel(
+      data = points, ggplot2::aes(x = n_total, y = .data[[yc$point]], label = label),
+      colour = registry_colour(points$registry[1]), size = 2.8, max.overlaps = Inf, seed = 1,
+      min.segment.length = 0, inherit.aes = FALSE)
+  }
+  rng <- dynamic_ranges(dplyr::bind_rows(cv, rc), points, yc, "both", n_floor, x_log)
+  if (is.na(yc$ref)) rng$y[1] <- max(0, rng$y[1])
+  p + ggplot2::scale_colour_manual(values = cols, name = paste0("Procedure period\n(", level_label(level), " limits)")) +
+    ggplot2::scale_y_continuous(labels = yc$fmt, breaks = scales::pretty_breaks(n = 8)) +
+    (if (x_log) ggplot2::scale_x_log10(labels = scales::comma) else ggplot2::scale_x_continuous(labels = scales::comma)) +
     ggplot2::coord_cartesian(xlim = rng$x, ylim = rng$y) +
     ggplot2::labs(x = "Procedure volume (n)", y = yc$lab, ...) +
     theme_funnel()

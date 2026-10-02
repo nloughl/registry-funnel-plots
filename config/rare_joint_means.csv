@@ -1,0 +1,15 @@
+# Registry mean (funnel centre) for each rare joint: the n-weighted pool of the matching rows at the
+# selected follow-up year (CI pooled from the published CIs, as for the UKA means). Decisions 2026-10:
+#   ankle: AOANJRR = all A11 diagnosis rows (same population as the A15 models); NJR = 3.A3 'All cases';
+#          LROI = A014B all primary ankles
+#   elbow (total elbow scope): AOANJRR = ET9 total-elbow rows (fracture + OA + RA); NJR = 3.E6 total elbow
+#          acute trauma + elective; LROI = E017B total elbow arthroplasty
+# kind: casemix | device. row_types: ';'-separated. label_regex matched against stratum_label (casemix) /
+# device_label (device), perl regex, case-insensitive.
+joint,registry,kind,table_key,row_types,label_regex,note
+ANKLE,AOANJRR,casemix,ankle_diagnosis,stratum;other,.,"A11 all diagnoses pooled (n = 5,379 = A15 population)"
+ANKLE,NJR,casemix,ankle_sex_age,total,^All cases$,"3.A3 All cases"
+ANKLE,LROI,casemix,ankle_overall,total,^Primary ankle$,"A014B all primary ankles (n from caption)"
+ELBOW,AOANJRR,casemix,elbow_class_diagnosis,stratum,^Total Elbow \|,"ET9 total elbow: fracture + OA + RA pooled"
+ELBOW,NJR,casemix,elbow_indication_type,stratum,^(Acute trauma|Elective) \| Total elbow$,"3.E6 total elbow: acute trauma + elective pooled"
+ELBOW,LROI,casemix,elbow_type,stratum,^Total elbow arthroplasty$,"E017B total elbow (n approximate, from E001)"

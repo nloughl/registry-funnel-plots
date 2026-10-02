@@ -148,6 +148,8 @@ pool_to_level <- function(points, level = 1, level3_attr = "bearing", rules = NU
       n_rows = dplyr::n(),
       device_label = paste(unique(device_label), collapse = " ; "),
       p_ref = dplyr::first(p_ref),
+      p_mean = dplyr::first(p_mean),
+      reference_used = dplyr::first(reference_used),
       report_year = dplyr::first(report_year),
       metric_type = dplyr::first(metric_type),
       table_id = paste(unique(table_id), collapse = "/"),

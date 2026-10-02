@@ -1,0 +1,70 @@
+registry,n_devices,n_outliers,n_implants,cumulative_excess,reference,family,reference_name
+AOANJRR,3,1,13753,177.87878084823993,mean,Oxford,registry mean
+EPRD,5,0,0,0,mean,Oxford,registry mean
+LROI,2,1,16206,147.8546428315325,mean,Oxford,registry mean
+NJR,5,1,41997,457.7673,mean,Oxford,registry mean
+SIRIS,2,0,0,0,mean,Oxford,registry mean
+All registries,17,3,71956,783.5007236797724,mean,Oxford,registry mean
+AOANJRR,3,1,13753,204.33550493211564,lcl,Oxford,lower CI of registry mean
+EPRD,5,0,0,0,lcl,Oxford,lower CI of registry mean
+LROI,2,1,16206,177.86118756586706,lcl,Oxford,lower CI of registry mean
+NJR,5,1,41997,491.3648999999998,lcl,Oxford,lower CI of registry mean
+SIRIS,2,0,0,0,lcl,Oxford,lower CI of registry mean
+All registries,17,3,71956,873.5615924979825,lcl,Oxford,lower CI of registry mean
+AOANJRR,3,1,13753,151.42205676436419,ucl,Oxford,upper CI of registry mean
+EPRD,5,0,0,0,ucl,Oxford,upper CI of registry mean
+LROI,2,1,16206,117.84809809719825,ucl,Oxford,upper CI of registry mean
+NJR,5,1,41997,424.1696999999999,ucl,Oxford,upper CI of registry mean
+SIRIS,2,0,0,0,ucl,Oxford,upper CI of registry mean
+All registries,17,3,71956,693.4398548615624,ucl,Oxford,upper CI of registry mean
+AOANJRR,1,0,0,0,mean,ZUK / Physica ZUK,registry mean
+EPRD,1,0,0,0,mean,ZUK / Physica ZUK,registry mean
+LROI,1,0,0,0,mean,ZUK / Physica ZUK,registry mean
+NJR,2,0,0,0,mean,ZUK / Physica ZUK,registry mean
+SIRIS,1,0,0,0,mean,ZUK / Physica ZUK,registry mean
+All registries,6,0,0,0,mean,ZUK / Physica ZUK,registry mean
+AOANJRR,1,0,0,0,lcl,ZUK / Physica ZUK,lower CI of registry mean
+EPRD,1,0,0,0,lcl,ZUK / Physica ZUK,lower CI of registry mean
+LROI,1,0,0,0,lcl,ZUK / Physica ZUK,lower CI of registry mean
+NJR,2,0,0,0,lcl,ZUK / Physica ZUK,lower CI of registry mean
+SIRIS,1,0,0,0,lcl,ZUK / Physica ZUK,lower CI of registry mean
+All registries,6,0,0,0,lcl,ZUK / Physica ZUK,lower CI of registry mean
+AOANJRR,1,0,0,0,ucl,ZUK / Physica ZUK,upper CI of registry mean
+EPRD,1,0,0,0,ucl,ZUK / Physica ZUK,upper CI of registry mean
+LROI,1,0,0,0,ucl,ZUK / Physica ZUK,upper CI of registry mean
+NJR,2,0,0,0,ucl,ZUK / Physica ZUK,upper CI of registry mean
+SIRIS,1,0,0,0,ucl,ZUK / Physica ZUK,upper CI of registry mean
+All registries,6,0,0,0,ucl,ZUK / Physica ZUK,upper CI of registry mean
+AOANJRR,2,0,0,0,mean,Journey,registry mean
+EPRD,2,1,1309,41.91598894262868,mean,Journey,registry mean
+LROI,1,0,0,0,mean,Journey,registry mean
+NJR,1,0,0,0,mean,Journey,registry mean
+SIRIS,1,1,1128,36.09600000000001,mean,Journey,registry mean
+All registries,7,2,2437,78.01198894262869,mean,Journey,registry mean
+AOANJRR,2,0,0,0,lcl,Journey,lower CI of registry mean
+EPRD,2,1,1309,41.91598894262868,lcl,Journey,lower CI of registry mean
+LROI,1,0,0,0,lcl,Journey,lower CI of registry mean
+NJR,1,0,0,0,lcl,Journey,lower CI of registry mean
+SIRIS,1,1,1128,38.35200000000001,lcl,Journey,lower CI of registry mean
+All registries,7,2,2437,80.26798894262869,lcl,Journey,lower CI of registry mean
+AOANJRR,2,0,0,0,ucl,Journey,upper CI of registry mean
+EPRD,2,1,1309,41.91598894262868,ucl,Journey,upper CI of registry mean
+LROI,1,0,0,0,ucl,Journey,upper CI of registry mean
+NJR,1,0,0,0,ucl,Journey,upper CI of registry mean
+SIRIS,1,1,1128,32.71200000000001,ucl,Journey,upper CI of registry mean
+All registries,7,2,2437,74.62798894262869,ucl,Journey,upper CI of registry mean
+AOANJRR,1,0,0,0,mean,BalanSys,registry mean
+EPRD,1,0,0,0,mean,BalanSys,registry mean
+LROI,1,1,844,28.715792431803855,mean,BalanSys,registry mean
+SIRIS,1,0,0,0,mean,BalanSys,registry mean
+All registries,4,1,844,28.715792431803855,mean,BalanSys,registry mean
+AOANJRR,1,0,0,0,lcl,BalanSys,lower CI of registry mean
+EPRD,1,0,0,0,lcl,BalanSys,lower CI of registry mean
+LROI,1,1,844,30.278517580253713,lcl,BalanSys,lower CI of registry mean
+SIRIS,1,0,0,0,lcl,BalanSys,lower CI of registry mean
+All registries,4,1,844,30.278517580253713,lcl,BalanSys,lower CI of registry mean
+AOANJRR,1,0,0,0,ucl,BalanSys,upper CI of registry mean
+EPRD,1,0,0,0,ucl,BalanSys,upper CI of registry mean
+LROI,1,1,844,27.153067283354016,ucl,BalanSys,upper CI of registry mean
+SIRIS,1,0,0,0,ucl,BalanSys,upper CI of registry mean
+All registries,4,1,844,27.153067283354016,ucl,BalanSys,upper CI of registry mean

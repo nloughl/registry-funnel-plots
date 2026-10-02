@@ -28,7 +28,80 @@ Figures are written to `figures/<procedure>_<t>yr_<slug>.png`.
 | `detail_level` | 0 | Points in the main catalogue: 0 = rows as listed, 1 = brand, 2 = + fixation, 3 = + attribute |
 | `detail_levels` | 1, 2, 3 | Levels compared in the "Detail levels" section |
 | `level3_attr` | bearing | Level-3 attribute: `bearing`, `material` (femoral) or `tibia` (all-poly / metal-backed) |
+| `fixation_filter` | all | At detail levels 2–3, show only `cemented` or `cementless` models (hybrid rows are left out) |
+| `label_points` | outliers | Point labels: `outliers` (outside the plot's limit), `all`, or `none` |
+| `reference` | mean | Funnel centre: `mean`, or `lcl` / `ucl` = lower / upper 95% CI of the registry mean |
 | `attribute_source` | stated | `stated`: only details printed in the report. `design`: also fills gaps from implant knowledge |
+
+## Reference: registry mean or its 95% CI
+The funnels can be centred on the registry mean or on the lower or upper 95% CI of that mean. The limits are rebuilt around the chosen value.
+- **Upper CI:** conservative, so fewer high outliers.
+- **Lower CI:** sensitive, so more high outliers.
+
+Everything is standardised to the chosen reference: y = rate − reference, so the funnel stays centred on 0 and the points shift by (bound − mean). Outlier status and excess revisions, n × (rate − reference), use the chosen reference.
+
+Where each registry's CI comes from:
+- **NJR and SIRIS:** published.
+- **LROI (cemented + uncemented) and AOANJRR (male + female KP22):** pooled from the parts' published CIs. SEᵢ = (ucl − lcl)/3.92 and SE = √Σ(wᵢ·SEᵢ)², with n weights. This is approximate.
+- **EPRD:** no CI (no published total), so it keeps its mean under every reference.
+- **Overrides:** `config/registry_means_override.csv` accepts `lcl_pct` / `ucl_pct`.
+
+The report's "Reference" section shows, for each family:
+- a per-registry panel plot with the funnels around the mean and both CI bounds
+- the outliers / procedures / excess under each reference
+- the devices whose outlier status changes between references
+
+The app has a reference selector and a checkbox to draw all three funnels.
+
+## LROI funnels by procedure period
+LROI Figure K052B gives the cumulative major revision of all primary UKAs by 2-year procedure period, from 2009-2010 to 2021-2022. It's extracted into `UKA_casemix_long.csv` with a `procedure_period` column. Each period gets its own funnel around its own rate.
+- **Report:** the "LROI: funnels by procedure period" section has:
+  - a rate-scale plot with the funnels at their true rates, the LROI registry-mean funnel dashed, and the LROI devices
+  - a standardised plot, with each period funnel centred on 0
+  - a table showing which period funnels each LROI device falls outside
+- **App:** Funnel → "Registry mean + LROI funnels by procedure period".
+- **Caveat:** K052B reports *major* revision (femur or tibia), while the device tables report any revision.
+
+## Rare joints: total ankle and total elbow
+These are read from the regextract outputs `outputs/ANKLE/` and `outputs/ELBOW/`, the sibling folders of `data_dir`. Run `python -m regextract extract --procedure ANKLE` (and `ELBOW`) first.
+- **Report:** the "Rare joints" section shows, for each joint:
+  - the registry means
+  - an all-models funnel plot
+  - a plot for each model family reported by at least 2 registries
+  - outlier and cumulative-excess tables under each plot
+
+  All high outliers go to `tables/rare_joints_<t>yr_outliers_998.csv`.
+- **Report parameters:**
+  - `rare_joints`: default ANKLE, ELBOW
+  - `rare_time_yr`: default 3. 1, 3 and 5 years are in every registry.
+  - `elbow_by_diagnosis`
+- **App:** a **Rare joints** tab next to the knee tab, with:
+  - joint, follow-up year (the years reported by at least 2 registries), model, registries
+  - control limit, distribution and reference
+  - AOANJRR elbow pooled vs per diagnosis
+  - y scale, log x, labels
+
+  Hover shows the model as printed, its diagnosis and its source table. There are CSV downloads.
+
+### Decisions (2026-10)
+- **Elbow = total elbow replacement only.** AOANJRR's supplement covers only total elbow. NJR radial head, distal humeral hemi and "unconfirmed" rows are dropped (`rare_scope()`).
+- **Registry means** are set in `config/rare_joint_means.csv`. Each is an n-weighted pool of the listed rows, with the CI pooled from the published CIs.
+
+  | Joint | AOANJRR | NJR | LROI |
+  |---|---|---|---|
+  | Ankle | A11, all diagnosis rows pooled (n = 5,379, same population as the A15 models) | 3.A3 All cases | A014B all primary ankles (n = 1,460 from the caption) |
+  | Elbow | ET9 total elbow: fracture + OA + RA pooled | 3.E6 total elbow: acute trauma + elective pooled | E017B total elbow (n = 816, approximate, from Table E001) |
+
+  Edit the CSV to change a definition. For example, to use AOANJRR A11 OA only, set `label_regex` to `^Osteoarthritis$`.
+- **AOANJRR elbow models** come per diagnosis (ET6 fracture, ET7 OA, ET8 RA).
+  - By default they're pooled into one point per humeral stem (n-weighted, no CI), labelled `[3 dx]`.
+  - With `elbow_by_diagnosis` (report) or "Per diagnosis" (app), each stem × diagnosis is judged against that diagnosis's ET9 total-elbow rate.
+- **Model names** are harmonised in `config/rare_device_families.csv`. Examples: BOX/Box, S.T.A.R/Star → STAR, Coonrad/Morrey and Coonrad Morrey → Coonrad-Morrey, the NJR and AOANJRR Latitude stems → Latitude.
+  - Where a registry has several rows in one family, the printed name is kept on the plot, e.g. NJR "Latitude EV Stem" and "Latitude / Latitude EV Stem".
+  - AOANJRR lists Salto and Salto Talaris separately. NJR's "Salto" is matched to Salto, but it may include Talaris.
+- **LROI** gives no model-level rates for ankle or elbow, so its funnel is drawn without points. LROI values are a manual transcription that has not yet been verified.
+- Metrics differ between registries (AOANJRR CPR, NJR 1−KM, LROI KM percentage), so compare models against their own registry's funnel only.
+- The AOANJRR ankle periods (A14) and the LROI total-ankle-for-OA periods (A015B) are extracted, but not plotted yet.
 
 ## Detail levels
 Registry rows are pooled within each registry to a common level of detail. This follows the RSA approach in doi:10.2340/17453674.2026.45293, but rows that lack the detail a level needs are **excluded**, not regrouped:
@@ -66,6 +139,9 @@ It runs only on your computer and uses the same `R/` functions as the report. Th
   - Wald normal approximation.
   - Exact binomial (Spiegelhalter).
   - Overdispersion-adjusted. This widens each registry's limits by √φ, where φ is estimated from all of that registry's devices at that year using Spiegelhalter's multiplicative model with 10% winsorising.
+- **Fixation shown** (detail levels 2–3): all, cemented only, or cementless only. The funnels stay centred on the registry's overall UKA mean.
+- **Label models on the plot:** outliers, all, or none.
+- **Funnel reference:** registry mean, lower CI or upper CI of the mean. An option draws all three funnels together (thin dotted/dash-dot lines). The rings and tables use the selected reference.
 - **Funnel:** registry mean, or registry mean + a case-mix envelope. The envelope is the range of age-sex class limits, available for AOANJRR and NJR. Outliers are still judged against the registry mean.
 - **Layout:** registries overlaid after standardising (difference or ratio), or one panel per registry on the rate scale.
 
@@ -89,6 +165,10 @@ To read the data from a different folder, set `REGISTRY_DATA_DIR` before startin
 | `R/limits.R` | `funnel_limits()` (normal / exact / overdispersed), `estimate_phi()`, `build_limit_curves()`, `classify_points()`, outlier reports |
 | `app/app.R` | Interactive Shiny app |
 | `R/plots.R` | `funnel_plot()` core function and the named variants |
+| `R/rare.R` | Rare joints: `load_rare()`, `rare_means()`, `rare_points()` |
+| `app/rare_tab.R` | Rare joints tab of the app |
+| `config/rare_joint_means.csv` | Which rows give each registry's rare-joint mean |
+| `config/rare_device_families.csv` | Harmonised rare-joint model names |
 | `R/levels.R` | Detail levels: `derive_attributes()`, `pool_to_level()`, `level_counts()` |
 | `config/device_families.csv` | Regex that groups each registry's device labels into families/brands (Oxford, ZUK, ...) |
 | `config/device_attributes.csv` | Rules for fixation / bearing / material / tibia, each marked stated or design |

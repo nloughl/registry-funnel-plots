@@ -19,6 +19,12 @@ params:
   detail_levels: [1, 2, 3]       # levels compared in the "Detail levels" section
   level3_attr: "bearing"         # level-3 attribute: "bearing", "material" (femoral) or "tibia" (all-poly / metal-backed)
   attribute_source: "stated"     # "stated" = only details printed in the report; "design" = also general implant knowledge
+  fixation_filter: "all"         # at detail levels 2-3: "all", "cemented" or "cementless" models only
+  label_points: "outliers"       # point labels: "outliers" (outside the plot's limit), "all" or "none"
+  rare_joints: ["ANKLE", "ELBOW"]  # rare-joint sections (regextract outputs/ANKLE, outputs/ELBOW)
+  rare_time_yr: 3                # follow-up year for the rare joints (1, 3 and 5 years are in every registry)
+  elbow_by_diagnosis: false      # AOANJRR elbow models: pooled per stem (false) or per diagnosis vs ET9 rate (true)
+  reference: "mean"              # funnel reference: "mean", "lcl" or "ucl" (lower / upper 95% CI of the registry mean)
   out_dir: "figures"
   save_png: true
 ---
@@ -32,7 +38,8 @@ for (f in list.files("R", pattern = "\\.R$", full.names = TRUE)) source(f)
 P <- params
 LEVELS <- unlist(P$levels)
 T_YR <- P$time_yr
-save_fig <- function(p, slug, ...) if (isTRUE(P$save_png)) save_plot(p, paste0(tolower(P$procedure), "_", T_YR, "yr_", slug), P$out_dir, ...)
+save_fig <- function(p, slug, ...) if (isTRUE(P$save_png))
+  save_plot(p, if (startsWith(slug, "rare_")) slug else paste0(tolower(P$procedure), "_", T_YR, "yr_", slug), P$out_dir, ...)
 ```
 
 # Data
@@ -44,11 +51,22 @@ overrides <- readr::read_csv("config/registry_means_override.csv", comment = "#"
 
 attr_rules <- load_attribute_rules("config/device_attributes.csv")
 
-means  <- registry_means(ext$device, ext$casemix, T_YR, overrides)
+means  <- registry_means(ext$device, ext$casemix, T_YR, overrides) |> set_reference(P$reference)
 rows   <- device_points(ext$device, means, T_YR, families) |>
   derive_attributes(attr_rules, P$attribute_source)
+# fixation filter: only meaningful at detail levels 2-3, where every point has a known fixation
+fix_filter <- function(pts, lv) if (lv >= 2 && P$fixation_filter != "all") filter(pts, fixation %in% P$fixation_filter) else pts
 points <- pool_to_level(rows, P$detail_level, P$level3_attr) |>
+  fix_filter(P$detail_level) |>
   classify_points(LEVELS, P$limit_method)
+
+# point labels: which points get a text label (P$label_points)
+lab_on <- P$label_points != "none"
+lab_filter <- function(lv) if (P$label_points == "all") NULL else
+  rlang::quo(funnel_status %in% paste(c("above", "below"), !!level_label(lv)))
+lab_note <- function(lv) switch(P$label_points, all = "labelled: all models", none = "",
+                                paste0("labelled: outside the ", level_label(lv), " limits"))
+fix_note <- function(lv) if (lv >= 2 && P$fixation_filter != "all") paste0(P$fixation_filter, " models only") else ""
 
 unverified <- unique(points$registry[points$verification %in% "unverified"])
 source_note <- paste0(
@@ -66,7 +84,11 @@ points |>
   count(registry, name = "devices") |>
   left_join(means, by = "registry") |>
   transmute(registry, report_year, metric_type, devices,
-            mean = scales::percent(p_ref, 0.01), n_total = scales::comma(n_total), mean_source) |>
+            mean = scales::percent(p_mean, 0.01),
+            `95% CI` = ifelse(is.na(p_lcl), "-", sprintf("%s-%s", scales::percent(p_lcl, 0.01), scales::percent(p_ucl, 0.01))),
+            reference = ifelse(reference_used == "mean", "mean", reference_label(reference_used)),
+            reference_rate = scales::percent(p_ref, 0.01),
+            n_total = scales::comma(n_total), mean_source, ci_source) |>
   knitr::kable()
 ```
 
@@ -137,9 +159,10 @@ plots <- tibble::tribble(
 
   "all_devices_998", "All devices", 12, 7, function()
     plot_standardised_overlay(reg_curves, means, 0.998, points = points, y = P$y_scale,
-      label_filter = rlang::quo(funnel_status != "within 95%"),
+      label_points = lab_on, label_filter = lab_filter(0.998),
       title = title("all listed devices vs. their registry's 99.8% limits"),
-      subtitle = paste(std_sub, "| labelled: outside the 95% limits"), caption = source_note)
+      subtitle = paste(c(std_sub, fix_note(P$detail_level), lab_note(0.998))[nzchar(c(std_sub, fix_note(P$detail_level), lab_note(0.998)))],
+                       collapse = " | "), caption = source_note)
 )
 
 # one plot per device family, at each level; at the outlier level (99.8%) each plot also gets
@@ -156,6 +179,7 @@ fam_plots <- tidyr::crossing(family = unlist(P$families), level = LEVELS) |>
          section = "Device families", width = 10, height = 6,
          make = purrr::map2(family, level, function(fam, lv) function()
            plot_family(reg_curves, points, means, fam, lv, y = P$y_scale,
+             label_points = lab_on, label_filter = lab_filter(lv),
              title = title(fam, " vs. registry ", level_label(lv), " limits"),
              subtitle = std_sub, caption = source_note)),
          tables = purrr::map2(family, level, function(fam, lv) function() fam_tables(fam, lv))) |>
@@ -167,7 +191,7 @@ plots <- bind_rows(plots, fam_plots)
 fmt_outliers <- function(out) {
   out |>
     transmute(Registry = registry, Device = label, `n (procedures)` = scales::comma(n_total),
-              `Rate (%)` = scales::percent(p, 0.01), `Registry mean (%)` = scales::percent(p_ref, 0.01),
+              `Rate (%)` = scales::percent(p, 0.01), `Reference (%)` = scales::percent(p_ref, 0.01),
               `Upper limit (%)` = scales::percent(upper_limit, 0.01), `Delta p (% points)` = scales::percent(delta_p, 0.01),
               `Excess (revisions)` = round(excess, 1))
 }
@@ -186,19 +210,22 @@ SUMMARY_DEFS <- paste0(
   "*Outlier devices*: number of devices outside (above) the upper limit.  \n",
   "*Procedures with an outlier device (n)* (unit: procedures/implants): the sum of n over the outlier devices only, ",
   "i.e. how many patients received an outlier implant, revised or not. It measures exposure, not harm.  \n",
-  "*Cumulative excess* (unit: revisions): the sum over the outlier devices only of n x (device rate - registry mean). ",
-  "It is the approximate number of revisions above what the registry-mean rate would have given in those procedures.  \n",
+  "*Cumulative excess* (unit: revisions): the sum over the outlier devices only of n x (device rate - reference). ",
+  "It is the approximate number of revisions above what the reference rate would have given in those procedures.  \n",
+  "*Reference*: the funnel centre used for this table: ", reference_label(P$reference),
+  if (P$reference != "mean") " (registries without a CI of their mean use the mean)" else "", ".  \n",
   "Example: a device with 10,000 procedures and a rate of 5.0%, in a registry with a mean of 4.0% and an upper limit at ",
   "n = 10,000 of 4.6%, is an outlier (5.0% > 4.6%). It adds 10,000 procedures and 10,000 x 0.010 = 100 excess revisions. ",
   "A device at 4.5% with the same n is above the mean but inside the limit, so it adds 0 to both.\n\n",
   "These are screening numbers for generating hypotheses, not precise estimates of harm.\n\n")
 
-render_plots <- function(tbl) {
+render_plots <- function(tbl, level = 2) {
+  h <- function(k) paste0(strrep("#", k), " ")
   if (!"tables" %in% names(tbl)) tbl$tables <- vector("list", nrow(tbl))
   for (sec in unique(tbl$section)) {
-    cat("\n\n## ", sec, "\n\n", sep = "")
+    cat("\n\n", h(level), sec, "\n\n", sep = "")
     for (i in which(tbl$section == sec)) {
-      cat("\n\n### ", tbl$slug[i], "\n\n", sep = "")
+      cat("\n\n", h(level + 1), tbl$slug[i], "\n\n", sep = "")
       p <- tbl$make[[i]]()
       print(p)
       save_fig(p, tbl$slug[i], width = tbl$width[i], height = tbl$height[i])
@@ -263,7 +290,7 @@ rows |>
 
 ```{r level_catalogue, results = "asis", fig.width = 12, fig.height = 7}
 lvl_points <- purrr::map(setNames(unlist(P$detail_levels), unlist(P$detail_levels)), function(lv)
-  pool_to_level(rows, lv, P$level3_attr) |> classify_points(LEVELS, P$limit_method))
+  pool_to_level(rows, lv, P$level3_attr) |> fix_filter(lv) |> classify_points(LEVELS, P$limit_method))
 lvl_tables <- function(lv, fam = NULL) function() {
   pts <- lvl_points[[as.character(lv)]]
   if (!is.null(fam)) pts <- filter(pts, family == fam)
@@ -271,7 +298,8 @@ lvl_tables <- function(lv, fam = NULL) function() {
   list(outliers = out, summary = outlier_summary(out, pts))
 }
 lvl_slug <- function(lv) paste0("level", lv, "_", P$attribute_source,
-                                if (lv == 3) paste0("_", P$level3_attr) else "")
+                                if (lv == 3) paste0("_", P$level3_attr) else "",
+                                if (lv >= 2 && P$fixation_filter != "all") paste0("_", P$fixation_filter) else "")
 lvl_plots <- tibble::tibble(level = unlist(P$detail_levels)) |>
   mutate(slug = paste0(purrr::map_chr(level, lvl_slug), "_all_models_", OUTLIER_LEVEL * 1000),
          section = "Detail levels: all models", width = 12, height = 7,
@@ -279,10 +307,12 @@ lvl_plots <- tibble::tibble(level = unlist(P$detail_levels)) |>
            pts <- lvl_points[[as.character(lv)]]
            plot_standardised_overlay(filter(reg_curves, registry %in% pts$registry), filter(means, registry %in% pts$registry),
              OUTLIER_LEVEL, points = pts, y = P$y_scale, x_log = TRUE,
-             label_filter = rlang::quo(funnel_status != paste("within", level_label(min(LEVELS)))),
+             label_points = lab_on, label_filter = lab_filter(OUTLIER_LEVEL),
              title = title("all models at ", level_title(lv, P$level3_attr)),
-             subtitle = paste0(std_sub, " | ", P$attribute_source, " attributes | labelled: outside the ",
-                               level_label(min(LEVELS)), " limits"),
+             subtitle = {
+               bits <- c(std_sub, paste(P$attribute_source, "attributes"), fix_note(lv), lab_note(OUTLIER_LEVEL))
+               paste(bits[nzchar(bits)], collapse = " | ")
+             },
              caption = source_note)
          }),
          tables = purrr::map(level, function(lv) lvl_tables(lv)))
@@ -315,6 +345,103 @@ purrr::imap_dfr(lvl_points, function(pts, lv) outlier_report(pts, OUTLIER_LEVEL,
   mutate(attribute_source = P$attribute_source, level3_attr = P$level3_attr) |>
   readr::write_csv(file.path("tables", sprintf("%s_%dyr_level_outliers_%s_%s.csv", tolower(P$procedure), T_YR,
                                                P$attribute_source, OUTLIER_LEVEL * 1000)))
+```
+
+
+# Reference: registry mean or its 95% CI {#reference}
+
+The funnels above are centred on each registry's **`r reference_label(P$reference)`** (parameter `reference`). This section compares three possible centres:
+
+* the **registry mean**, the default;
+* the **upper 95% CI of the mean**. This is more conservative: the funnel moves up, so a device must do worse to be flagged;
+* the **lower 95% CI of the mean**. This is more sensitive: the funnel moves down.
+
+The limits are recomputed around the chosen value, so the width changes too. Every funnel is **standardised to its own reference**: y = device rate − reference, so each funnel is centred on 0. With normal limits it is symmetric; exact binomial limits are naturally slightly asymmetric. Points are plotted against the same reference, so a point moves down by (bound − mean) under the upper CI and up under the lower CI. Below, each row of panels is one reference, and a point outside its panel's funnel is an outlier under that reference (triangles, labelled). The excess revisions are measured from the chosen reference: $n \times (p_{device} - p_{reference})$.
+
+Where the CI comes from:
+
+* **NJR and SIRIS**: published with the summary row.
+* **LROI** (cemented + uncemented totals) and **AOANJRR** (male + female KP22 subtotals): the parts' CIs are combined into an approximate pooled CI. Each part's SE is backed out of its CI width, $SE_i = (ucl_i - lcl_i)/3.92$, and then $SE = \sqrt{\sum (w_i SE_i)^2}$ with $w_i = n_i / \sum n$.
+* **EPRD**: no CI. The 2024 table has no UKA total, and its mean is the n-weighted mean of the listed devices, so EPRD **keeps its mean** under every reference (its CI rows below repeat the mean funnel).
+
+The registries are large, so these CIs are narrow (NJR ±0.08 percentage points). Changing the reference mainly affects devices close to a limit.
+
+```{r reference_means}
+means |>
+  transmute(Registry = registry, Mean = scales::percent(p_mean, 0.01),
+            `Lower CI` = scales::percent(p_lcl, 0.01), `Upper CI` = scales::percent(p_ucl, 0.01),
+            `CI half-width (% points)` = round((p_ucl - p_lcl) / 2 * 100, 2), `CI source` = ci_source) |>
+  knitr::kable(caption = paste0(T_YR, "-year registry means and 95% CIs"))
+```
+
+```{r reference_catalogue, results = "asis", fig.width = 12, fig.height = 7}
+REFS <- c("mean", "lcl", "ucl")
+ref_curves <- build_limit_curves(reference_refs(means, REFS, n_max = n_max_all, fill_missing = TRUE), OUTLIER_LEVEL, P$limit_method)
+with_reference <- function(pts, r) {
+  pts |>
+    select(-any_of(c("p_ref", "reference_used"))) |>
+    left_join(select(set_reference(means, r), registry, p_ref, reference_used), by = "registry")
+}
+ref_outliers <- function(pts) purrr::map_dfr(REFS, function(r) {
+  pr <- with_reference(pts, r)
+  out <- outlier_report(pr, OUTLIER_LEVEL, P$limit_method)
+  outlier_summary(out, pr) |> mutate(reference = r)
+})
+fmt_ref_summary <- function(sm) {
+  sm |>
+    mutate(reference = factor(reference, REFS, c("Mean", "Lower CI", "Upper CI"))) |>
+    transmute(Registry = registry, reference,
+              cell = sprintf("%d / %s / %.1f", as.integer(n_outliers), scales::comma(n_implants), cumulative_excess)) |>
+    tidyr::pivot_wider(names_from = reference, values_from = cell)
+}
+ref_log <- list()
+for (fam in unlist(P$families)) {
+  pts <- filter(points, family == fam)
+  if (!nrow(pts)) next
+  slug <- paste0("reference_", gsub("[^a-z0-9]+", "_", tolower(fam)), "_", OUTLIER_LEVEL * 1000)
+  cat("\n\n## ", fam, "\n\n", sep = "")
+  m_f <- filter(means, registry %in% pts$registry)
+  pl <- plot_reference_grid(filter(ref_curves, registry %in% pts$registry), m_f, OUTLIER_LEVEL, points = pts,
+    y = P$y_scale, title = title(fam, ": ", level_label(OUTLIER_LEVEL), " limits around the registry mean and its 95% CI"),
+    subtitle = paste0("Rows: funnel reference; each panel standardised to its own reference (0) | ",
+                      level_title(P$detail_level, P$level3_attr)),
+    caption = source_note)
+  print(pl)
+  save_fig(pl, slug, width = 12, height = 7)
+  sm <- ref_outliers(pts)
+  ref_log[[fam]] <- mutate(sm, family = fam)
+  cat("\n\n**Outlier devices / procedures with an outlier device (n) / cumulative excess (revisions), by reference**\n\n")
+  cat(knitr::kable(fmt_ref_summary(sm), align = "lrrr"), sep = "\n")
+  flips <- purrr::map_dfr(REFS, function(r) outlier_report(with_reference(pts, r), OUTLIER_LEVEL, P$limit_method) |>
+                            transmute(registry, label, reference = r)) |>
+    mutate(flag = TRUE) |>
+    tidyr::pivot_wider(names_from = reference, values_from = flag, values_fill = FALSE)
+  for (r in setdiff(REFS, names(flips))) flips[[r]] <- logical(nrow(flips))
+  flips <- filter(flips, !(mean & lcl & ucl))
+  if (nrow(flips)) {
+    cat("\n\nDevices whose outlier status depends on the reference:\n\n")
+    cat(knitr::kable(transmute(flips, Registry = registry, Device = label,
+                               `Mean` = ifelse(mean, "outlier", "-"), `Lower CI` = ifelse(lcl, "outlier", "-"),
+                               `Upper CI` = ifelse(ucl, "outlier", "-"))), sep = "\n")
+  } else cat("\n\nNo device changes outlier status between references.\n")
+}
+```
+
+**Summary across device families, by reference.** Each cell shows outlier devices / procedures with an outlier device (n) / cumulative excess (revisions). Only outlier devices are counted. Excess is measured from the reference used.
+
+```{r reference_summary}
+if (length(ref_log)) {
+  all_ref <- bind_rows(ref_log) |> filter(registry == "All registries")
+  bind_rows(ref_log) |>
+    mutate(reference_name = reference_label(reference)) |>
+    readr::write_csv(file.path("tables", sprintf("%s_%dyr_reference_summary_%s.csv", tolower(P$procedure), T_YR,
+                                                 OUTLIER_LEVEL * 1000)))
+  all_ref |>
+    mutate(registry = family) |>
+    fmt_ref_summary() |>
+    rename(Family = Registry) |>
+    knitr::kable(align = "lrrr")
+}
 ```
 
 
@@ -354,7 +481,8 @@ points |>
   filter(funnel_status != paste("within", level_label(min(LEVELS)))) |>
   arrange(desc(dev)) |>
   transmute(registry, device = label, n = scales::comma(n_total),
-            rate = scales::percent(p, 0.1), registry_mean = scales::percent(p_ref, 0.01),
+            rate = scales::percent(p, 0.1), registry_mean = scales::percent(p_mean, 0.01),
+            reference = scales::percent(p_ref, 0.01),
             difference = scales::percent(dev, 0.1), funnel_status) |>
   knitr::kable()
 ```
@@ -399,6 +527,172 @@ if (!is.null(ext$casemix)) {
            })) |>
     select(slug, section, width, height, make)
   render_plots(bind_rows(select(cm_plots, slug, section, width, height, make), env_plots))
+}
+```
+
+# LROI: funnels by procedure period {#periods}
+
+LROI Figure K052B reports the cumulative revision of all primary UKAs for osteoarthritis by the 2-year period in which the UKA was implanted, from 2009-2010 to 2021-2022.
+Revision rates have fallen over time. A device used mainly in recent years is compared, through the registry mean, with a rate that includes older periods with more revisions. The reverse holds for devices used mainly in the older periods.
+Instead of one registry-mean funnel, each period gets **its own funnel around its own `r T_YR`-year rate**.
+
+* **Rate scale:** the funnels sit at their true rates, so their shift over time is visible. The dashed black funnel is the LROI registry mean, and the points are LROI devices at `r level_title(P$detail_level, P$level3_attr)`.
+* **Standardised:** every period funnel is centred on 0, which shows only how the width changes, since newer periods have more procedures but fewer revisions.
+
+**Metric caveat:** K052B reports *major* revision (first revision of the femur or tibia). The device tables and the registry mean use *any* revision, so period rates are somewhat lower than device-table rates. Treat the comparison as indicative only.
+Periods without a `r T_YR`-year estimate (fewer than 50 at risk) are not drawn. LROI values are a manual transcription that has not yet been verified.
+
+```{r periods_data}
+periods <- period_strata(ext$casemix, T_YR)
+if (!is.null(periods)) {
+  per_curves <- periods |>
+    transmute(registry, period, p_ref = p, n_max = n_max_all) |>
+    build_limit_curves(LEVELS, P$limit_method) |>
+    mutate(period = factor(period, levels = levels(periods$period)))
+  lroi_pts <- filter(points, registry == "LROI")
+  periods |>
+    transmute(Period = procedure_period, `n (procedures)` = scales::comma(n_total),
+              !!paste0(T_YR, "-yr major revision (95% CI)") := sprintf("%.2f%% (%.2f-%.2f)", estimate, lcl, ucl),
+              Source = paste(table_id, "p.", pdf_page)) |>
+    knitr::kable(caption = paste0("LROI ", T_YR, "-year major revision by procedure period"))
+} else cat("No procedure-period data at ", T_YR, " years.\n")
+```
+
+```{r periods_plots, results = "asis", fig.width = 11, fig.height = 6.5}
+if (!is.null(periods)) {
+  m_l <- filter(means, registry == "LROI")
+  per_plots <- tidyr::crossing(level = OUTLIER_LEVEL, y = c("absolute", P$y_scale)) |>
+    mutate(slug = paste0("lroi_periods_", ifelse(y == "absolute", "rate", "standardised"), "_", level * 1000),
+           section = "LROI procedure periods", width = 11, height = 6.5,
+           make = purrr::map2(level, y, function(lv, yy) function()
+             plot_period_funnels(per_curves, filter(reg_curves, registry == "LROI"), m_l, lv,
+               points = lroi_pts, y = yy, label_points = lab_on,
+               title = title("LROI devices vs. ", level_label(lv), " funnels by procedure period"),
+               subtitle = if (yy == "absolute")
+                 "Each period's funnel around its own rate (major revision); dashed black: LROI registry-mean funnel (any revision)"
+               else "Each period's funnel centred on 0 (width only); points relative to the LROI registry mean",
+               caption = source_note)))
+  render_plots(select(per_plots, slug, section, width, height, make))
+
+  cat("\n\n**Which period funnels each LROI device falls outside** (", level_label(OUTLIER_LEVEL),
+      " limits around each period's rate, at the device's n):\n\n", sep = "")
+  ps <- period_status(lroi_pts, periods, OUTLIER_LEVEL, P$limit_method)
+  ps |>
+    mutate(cell = c(above = "above", within = "-", below = "below")[status]) |>
+    select(Device = label, n = n_total, Rate = p, period, cell) |>
+    mutate(n = scales::comma(n), Rate = scales::percent(Rate, 0.01)) |>
+    tidyr::pivot_wider(names_from = period, values_from = cell) |>
+    knitr::kable() |> print()
+}
+```
+
+# Rare joints: total ankle and total elbow {#rare}
+
+Total ankle and total elbow replacement from:
+
+* AOANJRR: the ankle supplement and the elbow & wrist supplement.
+* NJR: the Ankles and Elbows reports.
+* LROI: the 2025 annual report. LROI gives **no model-level rates**, so its funnel is drawn without points.
+
+The year is `r params$rare_time_yr` years. The settings are the same as above: `r P$limit_method` limits, the `r reference_label(P$reference)` as reference, and outliers judged against the `r level_label(OUTLIER_LEVEL)` upper limit.
+
+Decisions (2026-10, also in the README):
+
+* **Elbow = total elbow replacement only.** NJR radial head and distal humeral hemi brands, and the "unconfirmed" rows, are left out.
+* **Registry means** come from `config/rare_joint_means.csv`:
+  * Ankle:
+    * AOANJRR: all A11 diagnosis rows pooled, the same population as the A15 models.
+    * NJR: 3.A3 "All cases".
+    * LROI: A014B, all primary ankles.
+  * Elbow:
+    * AOANJRR: the ET9 total-elbow rows (fracture + OA + RA) pooled.
+    * NJR: the 3.E6 total-elbow rows (acute trauma + elective) pooled.
+    * LROI: the E017B total-elbow row. Its n is approximate, taken from Table E001.
+* **AOANJRR elbow models** are printed separately for fracture, OA and RA (ET6–ET8).
+  * By default each humeral stem's three rows are pooled, n-weighted, into one point, shown as `[3 dx]`.
+  * With `elbow_by_diagnosis = TRUE`, each stem × diagnosis is a separate point, judged against that diagnosis's ET9 rate.
+* **Model names** are harmonised with `config/rare_device_families.csv`, e.g. BOX/Box, S.T.A.R/Star and Coonrad/Morrey.
+* **Metrics differ:** AOANJRR reports CPR and NJR 1−KM. LROI values are a manual transcription that has not yet been verified.
+
+```{r rare_setup}
+RT <- params$rare_time_yr
+rare_cfg <- load_rare_config(".")
+rare <- purrr::compact(purrr::map(setNames(unlist(params$rare_joints), unlist(params$rare_joints)),
+                                  ~ load_rare(P$data_dir, .x)))
+if (!length(rare)) cat("No rare-joint outputs found next to", P$data_dir, "- run regextract with --procedure ANKLE / ELBOW.\n")
+```
+
+```{r rare_sections, results = "asis", fig.width = 11, fig.height = 6.5}
+rare_title <- function(joint, ...) paste0(names(RARE_JOINTS)[RARE_JOINTS == joint], " ", RT, "-year revision: ", ...)
+rare_tables <- function(pts) function() {
+  out <- outlier_report(pts, OUTLIER_LEVEL, P$limit_method)
+  list(outliers = out, summary = outlier_summary(out, pts))
+}
+rare_log <- list()
+for (joint in names(rare)) {
+  ext_j <- rare[[joint]]
+  m_j <- rare_means(ext_j, rare_cfg, RT) |> set_reference(P$reference)
+  if (!nrow(m_j)) { cat("\n\nNo ", joint, " registry means at ", RT, " years.\n", sep = ""); next }
+  pts_j <- rare_points(ext_j, m_j, rare_cfg, RT, isTRUE(params$elbow_by_diagnosis)) |>
+    classify_points(LEVELS, P$limit_method)
+  cat("\n\n## ", names(RARE_JOINTS)[RARE_JOINTS == joint], "\n\n", sep = "")
+  m_j |>
+    transmute(Registry = registry, Report = report_year, Metric = metric_type,
+              Mean = scales::percent(p_mean, 0.01),
+              `95% CI` = ifelse(is.na(p_lcl), "-", sprintf("%s-%s", scales::percent(p_lcl, 0.01), scales::percent(p_ucl, 0.01))),
+              n = scales::comma(n_total), `Models` = purrr::map_int(registry, ~ sum(pts_j$registry == .x)),
+              Source = mean_source) |>
+    knitr::kable(caption = paste0(joint, " registry means at ", RT, " years")) |> print()
+  only_mean <- rare_mean_only(m_j, pts_j)
+  if (length(only_mean)) cat("\n\nRegistries with a mean but no model-level rates (funnel only): ",
+                             paste(only_mean, collapse = ", "), ".\n", sep = "")
+  n_max_j <- max(c(pts_j$n_total, m_j$n_total), na.rm = TRUE) * 1.1
+  curves_j <- build_limit_curves(transmute(m_j, registry, p_ref, n_max = n_max_j), LEVELS, P$limit_method)
+  sub_j <- paste0("Each registry's ", sub("registry ", "", reference_label(P$reference)), " set to 0; limits use that registry's own rate")
+  fams <- pts_j |> distinct(registry, family) |> count(family) |> filter(n >= 2) |> pull(family)
+  rows <- tibble::tibble(
+    slug = paste0("rare_", tolower(joint), "_", RT, "yr_all_models_", OUTLIER_LEVEL * 1000),
+    section = paste(names(RARE_JOINTS)[RARE_JOINTS == joint], "funnels"), width = 11, height = 6.5,
+    make = list(function() plot_standardised_overlay(curves_j, m_j, LEVELS, points = pts_j, y = P$y_scale,
+      x_log = TRUE, label_points = lab_on, label_filter = lab_filter(OUTLIER_LEVEL),
+      title = rare_title(joint, "all models vs. their registry's limits"),
+      subtitle = paste(c(sub_j, lab_note(OUTLIER_LEVEL))[nzchar(c(sub_j, lab_note(OUTLIER_LEVEL)))], collapse = " | "),
+      caption = paste("Sources:", paste(sprintf("%s %s", m_j$registry, m_j$report_year), collapse = ", ")))),
+    tables = list(rare_tables(pts_j)))
+  for (fam in fams) {
+    pf <- filter(pts_j, family == fam)
+    rows <- bind_rows(rows, tibble::tibble(
+      slug = paste0("rare_", tolower(joint), "_", RT, "yr_family_", gsub("[^a-z0-9]+", "_", tolower(fam)), "_", OUTLIER_LEVEL * 1000),
+      section = paste(names(RARE_JOINTS)[RARE_JOINTS == joint], "funnels"), width = 10, height = 6,
+      make = list(local({ pf <- pf; fam <- fam; function()
+        plot_family(curves_j, pts_j, m_j, fam, OUTLIER_LEVEL, y = P$y_scale, label_points = lab_on,
+                    label_filter = lab_filter(OUTLIER_LEVEL),
+                    title = rare_title(joint, fam, " vs. registry ", level_label(OUTLIER_LEVEL), " limits"),
+                    subtitle = sub_j) })),
+      tables = list(rare_tables(pf))))
+  }
+  render_plots(rows, level = 3)
+  rare_log[[joint]] <- bind_rows(outlier_log[rows$slug]) |> mutate(joint = joint)
+}
+```
+
+**Rare-joint outliers** above the `r level_label(OUTLIER_LEVEL)` upper limit. Every high outlier across the all-models plots is written to `tables/rare_joints_outliers_998.csv`:
+
+```{r rare_export}
+if (length(rare_log)) {
+  rare_all <- bind_rows(rare_log) |> filter(grepl("all_models", plot))
+  if (nrow(rare_all)) {
+    rare_all |>
+      select(joint, registry, family, point = label, device_label, n_total, p, p_ref, upper_limit, delta_p, excess,
+             report_year, table_id, pdf_page) |>
+      mutate(pdf_page = as.character(pdf_page)) |>
+      readr::write_csv(file.path("tables", sprintf("rare_joints_%dyr_outliers_%s.csv", RT, OUTLIER_LEVEL * 1000)))
+    rare_all |>
+      transmute(Joint = joint, Registry = registry, Model = label, `n (procedures)` = scales::comma(n_total),
+                `Rate (%)` = scales::percent(p, 0.01), `Reference (%)` = scales::percent(p_ref, 0.01),
+                `Excess (revisions)` = round(excess, 1)) |>
+      knitr::kable()
+  } else cat("No rare-joint model above its registry's upper limit.\n")
 }
 ```
 

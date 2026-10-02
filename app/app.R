@@ -35,17 +35,18 @@ YEARS <- ext$device |>
   pull(time_yr) |>
   sort()
 REGISTRIES <- sort(unique(ext$device$registry))
-CASEMIX_REGS <- if (is.null(ext$casemix)) character() else sort(unique(ext$casemix$registry))
+# registries with an age-sex case-mix table (LROI's rows in the case-mix file are procedure periods, not age-sex)
+CASEMIX_REGS <- if (is.null(ext$casemix)) character() else sort(unique(ext$casemix$registry[!is.na(ext$casemix$age_group)]))
 
 METHODS <- c("Normal approximation (Wald)" = "normal",
-             "Exact binomial (Spiegelhalter)" = "exact",
-             "Overdispersion-adjusted (multiplicative)" = "overdispersed")
+             "Exact binomial (Spiegelhalter)" = "exact")
+#             "Overdispersion-adjusted (multiplicative)" = "overdispersed")
 
 # ------------------------------------------------------------------------------------------------ UI
-ui <- page_sidebar(
-  title = paste(PROCEDURE, "revision funnel plots"),
+source(file.path(APP_DIR, "rare_tab.R"), local = TRUE)   # Rare joints tab; local = TRUE: it uses ROOT / DATA_DIR defined above
+
+uka_ui <- nav_panel(paste("Knee", paste0("(", PROCEDURE, ")")), layout_sidebar(
   fillable = FALSE,
-  theme = bs_theme(version = 5, bootswatch = "flatly"),
   sidebar = sidebar(
     width = 320,
     selectInput("year", "Follow-up year", choices = YEARS, selected = if (3 %in% YEARS) 3 else YEARS[1]),
@@ -53,6 +54,10 @@ ui <- page_sidebar(
     selectInput("detail", "Detail level", choices = DETAIL_LEVELS, selected = 1),
     conditionalPanel("input.detail == '3'",
       selectInput("attr3", "Level-3 attribute", choices = LEVEL3_ATTRS)),
+    conditionalPanel("input.detail == '2' || input.detail == '3'",
+      radioButtons("fix_filter", "Fixation shown",
+                   choices = c("All" = "all", "Cemented only" = "cemented", "Cementless only" = "cementless"),
+                   selected = "all", inline = TRUE)),
     conditionalPanel("input.detail != '0'",
       radioButtons("attr_src", "Attributes",
                    choices = c("Stated in report" = "stated", "Stated + design knowledge" = "design"),
@@ -61,8 +66,11 @@ ui <- page_sidebar(
     radioButtons("level", "Control limit",
                  choices = c("99.8%" = "0.998", "95%" = "0.95", "Both" = "both"), selected = "0.998", inline = TRUE),
     selectInput("method", "Funnel distribution", choices = METHODS),
+    radioButtons("reference", "Funnel reference", choices = REFERENCES, selected = "mean"),
+    checkboxInput("ref_overlay", "Also draw funnels around the mean and both CI bounds", FALSE),
     radioButtons("centre", "Funnel",
-                 choices = c("Registry mean" = "mean", "Registry mean + case-mix envelope" = "casemix"),
+                 choices = c("Registry mean" = "mean", "Registry mean + case-mix envelope" = "casemix",
+                             "Registry mean + LROI funnels by procedure period" = "period"),
                  selected = "mean"),
     radioButtons("layout", "Layout",
                  choices = c("Overlay (standardised)" = "overlay", "Panel per registry (rate)" = "panels"),
@@ -71,7 +79,8 @@ ui <- page_sidebar(
       radioButtons("yscale", "Y scale", choices = c("Difference from mean" = "difference", "Ratio to mean" = "ratio"),
                    selected = "difference", inline = TRUE)),
     checkboxInput("xlog", "Log x axis", FALSE),
-    checkboxInput("labels", "Label outliers on the plot", TRUE),
+    radioButtons("labels", "Label models on the plot",
+                 choices = c("Outliers" = "outliers", "All" = "all", "None" = "none"), selected = "outliers", inline = TRUE),
     hr(),
     downloadButton("dl_outliers", "Outliers (CSV)", class = "btn-sm"),
     downloadButton("dl_points", "All points (CSV)", class = "btn-sm"),
@@ -96,21 +105,40 @@ ui <- page_sidebar(
            tags$i("Example: n = 10,000 at 5.0%, registry mean 4.0%, upper limit 4.6% → outlier: 10,000 procedures, ",
                   "100 excess revisions. The same n at 4.5% is inside the limit and adds 0. Screening numbers, not precise estimates."))))
   ),
-  card(card_header("Registry means at this follow-up year"), tableOutput("means")),
+  card(card_header("Registry means, 95% CI and funnel reference at this follow-up year"), tableOutput("means"),
+       card_footer(helpText("CI: published (NJR, SIRIS) or pooled from the published CIs of the parts (LROI cemented + uncemented, ",
+                            "AOANJRR male + female; approximate). EPRD has no published total, so it keeps its mean under every reference."))),
   card(card_header(textOutput("level_title")), tableOutput("level_counts"),
        card_footer(helpText("Points / rows kept (share of procedures kept) for the selected model. ",
                             "Rows without the detail a level needs are excluded, not regrouped.")))
+))
+
+ui <- page_navbar(
+  title = "Registry revision funnel plots",
+  theme = bs_theme(version = 5, bootswatch = "flatly"),
+  fillable = FALSE,
+  uka_ui,
+  rare_ui()
 )
 
 # -------------------------------------------------------------------------------------------- server
 server <- function(input, output, session) {
 
+  rare_server(input, output, session)
+
   yr      <- reactive(as.numeric(input$year))
   levels_ <- reactive(if (input$level == "both") c(0.95, 0.998) else as.numeric(input$level))
   out_lvl <- reactive(max(levels_()))
+  ref_sel <- reactive(if (is.null(input$reference)) "mean" else input$reference)
+  # fixation filter only applies at detail levels 2 and 3 (where fixation is known)
+  fix_sel <- reactive(if (is.null(input$fix_filter) || detail() < 2) "all" else input$fix_filter)
+  label_sel <- reactive(if (is.null(input$labels)) "outliers" else if (isTRUE(input$labels)) "outliers"
+                        else if (isFALSE(input$labels)) "none" else input$labels)
+  labelled <- function(d) switch(label_sel(), all = d, none = d[0, ], d[d$outlier != "none", ])
 
   means <- reactive({
     registry_means(ext$device, ext$casemix, yr(), overrides) |>
+      set_reference(ref_sel()) |>
       filter(registry %in% input$registries)
   })
 
@@ -133,6 +161,7 @@ server <- function(input, output, session) {
   points <- reactive({
     pts <- all_points()
     if (input$family != "__all__") pts <- filter(pts, family == input$family)
+    if (fix_sel() != "all") pts <- filter(pts, fixation %in% fix_sel())
     pts <- classify_points(pts, levels_(), input$method)
     hi <- outlier_report(pts, out_lvl(), input$method)
     lo_lim <- purrr::pmap_dbl(list(pts$p_ref, pts$n_total, pts$phi),
@@ -155,6 +184,18 @@ server <- function(input, output, session) {
     build_limit_curves(refs, levels_(), input$method)
   })
 
+  # funnels around the mean and both CI bounds (outlier level only), for the reference overlay
+  ref_curves <- reactive({
+    if (!isTRUE(input$ref_overlay %||% FALSE)) return(NULL)
+    m <- filter(means(), registry %in% plot_regs())
+    refs <- reference_refs(m, c("mean", "lcl", "ucl"), n_max = max(points()$n_total) * 1.1,
+                           phi = distinct(all_points(), registry, phi))
+    refs <- filter(refs, reference != ref_sel())   # the selected reference is already drawn
+    if (!nrow(refs)) return(NULL)
+    build_limit_curves(refs, out_lvl(), input$method)
+  })
+  REF_DASH <- c(mean = "longdash", lcl = "dot", ucl = "dashdot")
+
   cm_curves <- reactive({
     if (input$centre != "casemix" || is.null(ext$casemix)) return(NULL)
     st <- casemix_strata(ext$casemix, yr(), njr_level = "group") |>
@@ -168,6 +209,35 @@ server <- function(input, output, session) {
     build_limit_curves(refs, out_lvl(), input$method)
   })
 
+  # LROI procedure-period funnels (K052B): one funnel per 2-year period around that period's own rate
+  per_curves <- reactive({
+    if (input$centre != "period" || !"LROI" %in% plot_regs()) return(NULL)
+    per <- period_strata(ext$casemix, yr())
+    if (is.null(per)) return(NULL)
+    ph <- distinct(all_points(), registry, phi)
+    per |>
+      left_join(ph, by = "registry") |>
+      transmute(registry, period, p_ref = p, phi = coalesce(phi, 1), n_max = max(points()$n_total) * 1.1) |>
+      build_limit_curves(out_lvl(), input$method) |>
+      mutate(period = factor(period, levels = levels(per$period)))
+  })
+
+  add_period_lines <- function(p, pc, ycols) {
+    pcol <- period_colours(levels(pc$period))
+    for (pr in levels(pc$period)) {
+      c1 <- filter(pc, period == pr)
+      if (!nrow(c1)) next
+      for (side in c("upper", "lower")) {
+        p <- add_lines(p, data = c1, x = ~n, y = c1[[ycols[[side]]]], opacity = 0.85,
+                       line = list(color = pcol[[pr]], width = 1.3),
+                       name = paste("LROI", pr), legendgroup = paste0("period_", pr), showlegend = side == "upper",
+                       hovertemplate = paste0("LROI ", pr, " (", scales::percent(c1$p0[1], 0.01), ") ",
+                                              level_label(out_lvl()), " ", side, "<br>n = %{x:,}<br>%{y:.2%}<extra></extra>"))
+      }
+    }
+    p
+  }
+
   # ---------------------------------------------------------------------------------------- notes
   output$notes <- renderUI({
     msgs <- character()
@@ -179,6 +249,15 @@ server <- function(input, output, session) {
     fb <- means()$registry[grepl("FALLBACK", means()$mean_source)]
     if (length(fb)) msgs <- c(msgs, paste0("Mean is the n-weighted mean of listed devices (no registry total) for: ",
                                            paste(fb, collapse = ", "), "."))
+    if (input$centre == "period") {
+      pc <- per_curves()
+      msgs <- c(msgs, if (is.null(pc)) paste0("No LROI procedure-period data at ", yr(), " years (or LROI not shown).")
+        else paste0("LROI funnels by procedure period (Figure K052B): one ", level_label(out_lvl()),
+          " funnel per 2-year period around that period's own ", yr(), "-year rate. ",
+          if (input$layout == "overlay") "In the overlay each period funnel is centred on 0 (width only); use the panel layout to see them at their true rates. "
+          else "", "K052B reports MAJOR revision (femur or tibia), the device tables any revision, so treat this as indicative. ",
+          "Outliers (rings, tables) are still judged against the registry reference."))
+    }
     if (input$centre == "casemix") {
       nocm <- setdiff(plot_regs(), CASEMIX_REGS)
       msgs <- c(msgs, paste0("Case-mix envelope available for ", paste(intersect(plot_regs(), CASEMIX_REGS), collapse = ", "),
@@ -199,15 +278,31 @@ server <- function(input, output, session) {
                              paste(sprintf("%s %.2f", ph$registry, ph$phi), collapse = ", "),
                              " (limits widened by √φ)."))
     }
+    if (ref_sel() != "mean") {
+      noci <- means()$registry[means()$reference_used == "mean"]
+      msgs <- c(msgs, paste0("Funnels centred on the ", reference_label(ref_sel()), "; y and the funnels are standardised to ",
+                             "this reference (0), and excess is measured from it.",
+                             if (length(noci)) paste0(" No CI of the mean for ", paste(noci, collapse = ", "),
+                                                      ": these use the mean.") else ""))
+    }
+    if (isTRUE(input$ref_overlay %||% FALSE)) msgs <- c(msgs, paste0("Thin extra funnels (", level_label(out_lvl()),
+      "): long dash = around the registry mean, dotted = lower CI, dash-dot = upper CI of the mean. ",
+      "Rings and tables use the selected reference only. ",
+      if (input$layout == "overlay") "In the overlay every funnel is standardised to its own reference (all centred on 0), so the extra funnels show the change in width; points are placed relative to the selected reference. Use the panel layout (rate scale) to see the funnels at their true positions." else ""))
+    if (fix_sel() != "all") msgs <- c(msgs, paste0("Showing ", fix_sel(), " models only (hybrid and SIRIS ",
+      "'cemented/hybrid' rows are left out). Funnels are still centred on each registry's overall UKA mean, ",
+      "not a ", fix_sel(), "-only mean."))
     if (!length(msgs)) return(NULL)
     div(class = "alert alert-secondary py-2 small", HTML(paste(msgs, collapse = "<br>")))
   })
 
   output$plot_title <- renderText({
-    sprintf("%s: %s, %s, %d-year revision, %s limits (%s)", PROCEDURE,
-            if (input$family == "__all__") "all models" else input$family,
+    sprintf("%s: %s, %s, %d-year revision, %s limits around the %s (%s)", PROCEDURE,
+            paste0(if (input$family == "__all__") "all models" else input$family,
+                   if (fix_sel() != "all") paste0(" (", fix_sel(), " only)") else ""),
             level_title(detail(), input$attr3), yr(),
-            paste(level_label(levels_()), collapse = " & "), names(METHODS)[METHODS == input$method])
+            paste(level_label(levels_()), collapse = " & "), reference_label(ref_sel()),
+            names(METHODS)[METHODS == input$method])
   })
 
   # ----------------------------------------------------------------------------------------- plot
@@ -221,10 +316,11 @@ server <- function(input, output, session) {
                  sprintf(" (%s–%s)", scales::percent(d$lcl / 100, 0.01), scales::percent(d$ucl / 100, 0.01)))
     pooled <- if ("n_rows" %in% names(d)) ifelse(d$n_rows > 1, paste0("<br>Pooled rows: ", d$device_label), "") else ""
     sprintf(paste0("<b>%s</b> — %s<br>n = %s<br>%d-yr revision: %s%s%s<br>",
-                   "Registry mean: %s<br>Δp: %s<br>Upper %s limit: %s<br>%s<br><i>%s %s, table %s p.%s</i>"),
+                   "Registry mean: %s<br>Reference (%s): %s<br>Δp vs reference: %s<br>Upper %s limit: %s<br>%s<br><i>%s %s, table %s p.%s</i>"),
             d$registry, d$label, scales::comma(d$n_total), yr(),
             scales::percent(d$p, 0.01), ci, pooled,
-            scales::percent(d$p_ref, 0.01), scales::percent(d$p - d$p_ref, 0.01),
+            scales::percent(d$p_mean, 0.01), d$reference_used, scales::percent(d$p_ref, 0.01),
+            scales::percent(d$p - d$p_ref, 0.01),
             level_label(out_lvl()), scales::percent(d$upper_limit, 0.01),
             c(high = "<b style='color:#c0392b'>HIGH OUTLIER</b>", low = "<b style='color:#1e8449'>Low outlier</b>",
               none = "Within limits")[d$outlier],
@@ -250,7 +346,7 @@ server <- function(input, output, session) {
   overlay_plot <- function() {
     yc <- y_cols(input$yscale)
     cv <- curves(); pts <- points(); m <- means() |> filter(registry %in% plot_regs())
-    labs <- registry_legend_labels(m)
+    labs <- registry_legend_labels(m, ci = TRUE)
     cols <- registry_colour(m$registry)
     p <- plot_ly()
     cm <- cm_curves()
@@ -269,6 +365,8 @@ server <- function(input, output, session) {
         }
       }
     }
+    pc <- per_curves()
+    if (!is.null(pc)) p <- add_period_lines(p, pc, yc)
     for (reg in m$registry) {
       for (lv in levels_()) {
         c1 <- filter(cv, registry == reg, level == lv)
@@ -280,6 +378,17 @@ server <- function(input, output, session) {
                          hovertemplate = paste0(reg, " ", level_label(lv), " ", side, " limit<br>n = %{x:,}<br>%{y:.2%}<extra></extra>"))
         }
       }
+      rc <- ref_curves()
+      if (!is.null(rc)) for (r in unique(rc$reference[rc$registry == reg])) {
+        c1 <- filter(rc, registry == reg, reference == r)
+        for (side in c("upper", "lower")) {
+          p <- add_lines(p, data = c1, x = ~n, y = c1[[yc[[side]]]], opacity = 0.7,
+                         line = list(color = cols[[reg]], width = 1.2, dash = REF_DASH[[r]]),
+                         name = labs[[reg]], legendgroup = reg, showlegend = FALSE,
+                         hovertemplate = paste0(reg, " ", level_label(out_lvl()), " ", side, " limit around the ",
+                                                reference_label(r), "<br>n = %{x:,}<br>%{y:.2%}<extra></extra>"))
+        }
+      }
       d <- filter(pts, registry == reg)
       if (nrow(d)) {
         p <- add_markers(p, data = d, x = ~n_total, y = d[[yc$point]], text = hover_text(d), hoverinfo = "text",
@@ -288,13 +397,13 @@ server <- function(input, output, session) {
       }
     }
     p <- add_rings(p, pts, "n_total", yc$point)
-    if (isTRUE(input$labels)) {
-      o <- filter(pts, outlier != "none")
+    {
+      o <- labelled(pts)
       if (nrow(o)) p <- add_annotations(p, x = if (input$xlog) log10(o$n_total) else o$n_total, y = o[[yc$point]],
                                         text = o$label, showarrow = TRUE, arrowhead = 0, ax = 25, ay = -25,
                                         font = list(size = 10, color = unname(cols[o$registry])))
     }
-    rng <- dynamic_ranges(cv, pts, yc, "both", NULL, isTRUE(input$xlog))
+    rng <- dynamic_ranges(bind_rows(cv, ref_curves(), per_curves()), pts, yc, "both", NULL, isTRUE(input$xlog))
     layout(p,
       xaxis = list(title = "Procedure volume (n)", type = if (input$xlog) "log" else "linear",
                    range = if (input$xlog) log10(rng$x) else rng$x, tickformat = ",", zeroline = FALSE),
@@ -307,7 +416,7 @@ server <- function(input, output, session) {
 
   panel_plot <- function() {
     cv <- curves(); pts <- points(); m <- means() |> filter(registry %in% plot_regs())
-    labs <- registry_legend_labels(m); cols <- registry_colour(m$registry)
+    labs <- registry_legend_labels(m, ci = TRUE); cols <- registry_colour(m$registry)
     cm <- cm_curves()
     panels <- lapply(m$registry, function(reg) {
       c1 <- filter(cv, registry == reg); d <- filter(pts, registry == reg)
@@ -326,13 +435,31 @@ server <- function(input, output, session) {
             line = list(color = cols[[reg]], width = 1.8, dash = line_dash(lv)), showlegend = FALSE,
             hovertemplate = paste0(level_label(lv), " ", side, "<br>n = %{x:,}<br>%{y:.2%}<extra></extra>"))
       }
-      p <- add_lines(p, x = range(c1$n), y = rep(m$p_ref[m$registry == reg], 2),
+      rc <- ref_curves()
+      if (!is.null(rc)) for (r in unique(rc$reference[rc$registry == reg])) {
+        c3 <- filter(rc, registry == reg, reference == r)
+        for (side in c("upper", "lower")) p <- add_lines(p, data = c3, x = ~n, y = c3[[side]], opacity = 0.7,
+            line = list(color = cols[[reg]], width = 1.2, dash = REF_DASH[[r]]), showlegend = FALSE,
+            hovertemplate = paste0(level_label(out_lvl()), " ", side, " around the ", reference_label(r),
+                                   "<br>n = %{x:,}<br>%{y:.2%}<extra></extra>"))
+      }
+      pc <- per_curves()
+      if (!is.null(pc) && reg == "LROI") p <- add_period_lines(p, pc, list(upper = "upper", lower = "lower"))
+      p <- add_lines(p, x = range(c1$n), y = rep(m$p_mean[m$registry == reg], 2),
                      line = list(color = cols[[reg]], width = 1), showlegend = FALSE, hoverinfo = "skip")
+      if (m$reference_used[m$registry == reg] != "mean")
+        p <- add_lines(p, x = range(c1$n), y = rep(m$p_ref[m$registry == reg], 2),
+                       line = list(color = cols[[reg]], width = 1, dash = "dot"), showlegend = FALSE,
+                       hovertemplate = paste0("Reference (", reference_label(ref_sel()), "): %{y:.2%}<extra></extra>"))
       if (nrow(d)) {
         p <- add_markers(p, data = d, x = ~n_total, y = ~p, text = hover_text(d), hoverinfo = "text",
                          marker = list(color = cols[[reg]], size = 9, line = list(color = "white", width = 1)),
                          showlegend = FALSE)
         p <- add_rings(p, d, "n_total", "p")
+        o <- labelled(d)
+        if (nrow(o)) p <- add_text(p, data = o, x = ~n_total, y = ~p, text = ~label, textposition = "top right",
+                                   textfont = list(size = 10, color = cols[[reg]]), showlegend = FALSE,
+                                   hoverinfo = "skip", inherit = FALSE)
       }
       p
     })
@@ -340,7 +467,8 @@ server <- function(input, output, session) {
     axes <- list()
     for (i in seq_along(m$registry)) {
       reg <- m$registry[i]
-      rng <- dynamic_ranges(filter(cv, registry == reg), filter(pts, registry == reg),
+      rng <- dynamic_ranges(bind_rows(filter(cv, registry == reg),
+                                      if (reg == "LROI") per_curves()), filter(pts, registry == reg),
                             y_cols("absolute"), "both", NULL, isTRUE(input$xlog))
       sfx <- if (i == 1) "" else i
       axes[[paste0("xaxis", sfx)]] <- list(type = if (input$xlog) "log" else "linear", tickformat = ",",
@@ -355,15 +483,16 @@ server <- function(input, output, session) {
     })
     sp <- subplot(panels, nrows = nr, shareX = FALSE, shareY = FALSE, titleX = FALSE, titleY = FALSE,
                   margin = c(0.04, 0.04, 0.09, 0.06))
-    do.call(layout, c(list(sp, showlegend = FALSE, hoverlabel = list(align = "left"), annotations = titles), axes)) |>
+    do.call(layout, c(list(sp, showlegend = !is.null(per_curves()), hoverlabel = list(align = "left"), annotations = titles), axes)) |>
       config(toImageButtonOptions = list(format = "png", filename = plot_filename(), scale = 3), displaylogo = FALSE)
   }
 
   plot_filename <- function() {
-    sprintf("%s_%dyr_L%s%s_%s_%s_%s", tolower(PROCEDURE), yr(), detail(),
+    sprintf("%s_%dyr_L%s%s_%s_%s_%s_ref-%s", tolower(PROCEDURE), yr(), detail(),
             if (detail() == 0) "" else paste0("_", input$attr_src, if (detail() == 3) paste0("_", input$attr3) else ""),
-            if (input$family == "__all__") "all" else gsub("[^a-z0-9]+", "_", tolower(input$family)),
-            gsub("\\.", "", input$level), input$method)
+            paste0(if (input$family == "__all__") "all" else gsub("[^a-z0-9]+", "_", tolower(input$family)),
+                   if (fix_sel() != "all") paste0("_", fix_sel()) else ""),
+            gsub("\\.", "", input$level), input$method, ref_sel())
   }
 
   # --------------------------------------------------------------------------------------- tables
@@ -378,10 +507,14 @@ server <- function(input, output, session) {
   output$outliers <- renderTable({
     o <- outliers_hi()
     if (!nrow(o)) return(data.frame(Result = "No devices above the upper limit."))
-    o |> transmute(Registry = registry, Device = label, `n (procedures)` = scales::comma(n_total),
-                   `Rate (%)` = scales::percent(p, 0.01), `Registry mean (%)` = scales::percent(p_ref, 0.01),
-                   `Upper limit (%)` = scales::percent(upper_limit, 0.01), `Delta p (% pts)` = scales::percent(delta_p, 0.01),
-                   `Excess (revisions)` = sprintf("%.1f", excess))
+    o |> transmute(Registry = registry, 
+                   Device = label, 
+                   `n (procedures)` = scales::comma(n_total),
+                   `Revision Rate (%)` = scales::percent(p, 0.01), 
+                   `Reference Revision Rate (%)` = scales::percent(p_ref, 0.01),
+                   `Upper limit (%)` = scales::percent(upper_limit, 0.01), 
+                   `Delta p (% pts)` = scales::percent(delta_p, 0.01),
+                   `Excess (revisions; n x delta p)` = sprintf("%.1f", excess))
   }, striped = TRUE, spacing = "s")
 
   output$summary <- renderTable({
@@ -394,8 +527,13 @@ server <- function(input, output, session) {
   output$means <- renderTable({
     m <- means() |> left_join(distinct(all_points(), registry, phi, n_devices_phi), by = "registry")
     m |> transmute(Registry = registry, Report = report_year, Metric = metric_type,
-                   Mean = scales::percent(p_ref, 0.01), n = scales::comma(n_total),
-                   `φ (overdispersion)` = sprintf("%.2f", phi), Source = mean_source)
+                   Mean = scales::percent(p_mean, 0.01),
+                   `95% CI` = ifelse(is.na(p_lcl), "–", sprintf("%s–%s", scales::percent(p_lcl, 0.01), scales::percent(p_ucl, 0.01))),
+                   `CI source` = ci_source,
+                   Reference = ifelse(reference_used == "mean", "mean", reference_label(reference_used)),
+                   `Reference rate` = scales::percent(p_ref, 0.01), n = scales::comma(n_total),
+                   # `φ (overdispersion)` = sprintf("%.2f", phi), Source = mean_source)
+                   Source = mean_source)
   }, striped = TRUE, spacing = "s")
 
   output$level_title <- renderText(sprintf("Detail levels: rows kept per registry (%s attributes%s)",
@@ -415,13 +553,13 @@ server <- function(input, output, session) {
     filename = function() paste0(plot_filename(), "_outliers.csv"),
     content = function(file) readr::write_csv(
       mutate(outliers_hi(), detail_level = detail(), attribute_source = input$attr_src) |>
-        select(detail_level, attribute_source, registry, family, point = label, device_label, n_total, p, p_ref,
+        select(detail_level, attribute_source, registry, family, point = label, device_label, n_total, p, p_mean, reference_used, p_ref,
                upper_limit, delta_p, excess, report_year, table_id, pdf_page), file))
   output$dl_points <- downloadHandler(
     filename = function() paste0(plot_filename(), "_points.csv"),
     content = function(file) readr::write_csv(
       mutate(points(), detail_level = detail(), attribute_source = input$attr_src) |>
-        select(detail_level, attribute_source, registry, family, point = label, device_label, n_total, p, lcl, ucl, p_ref, phi,
+        select(detail_level, attribute_source, registry, family, point = label, device_label, n_total, p, lcl, ucl, p_mean, reference_used, p_ref, phi,
              lower_limit, upper_limit, outlier, report_year, table_id, pdf_page, verification), file))
 }
 

@@ -22,7 +22,7 @@ exact_bound <- function(p0, n, prob) {
 #' Limits for one reference rate over a vector of n. Returns absolute limits and the two
 #' standardised versions: difference (limit - p0) and ratio (limit / p0).
 funnel_limits <- function(p0, n, levels = c(0.95, 0.998), method = c("normal", "exact", "overdispersed"),
-                          phi = 1) {
+                          phi = 1, centre = p0) {
   method <- match.arg(method)
   phi_used <- if (method == "overdispersed") max(phi, 1) else 1
   infl <- sqrt(phi_used)
@@ -36,8 +36,10 @@ funnel_limits <- function(p0, n, levels = c(0.95, 0.998), method = c("normal", "
       p0 = p0,
       # standardised scales keep the unclipped lower limit, so both sides of the funnel show;
       # on the absolute scale a revision rate cannot go below 0
-      dev_lower = lower - p0, dev_upper = upper - p0,
-      ratio_lower = lower / p0, ratio_upper = upper / p0,
+      # `centre` is the value the standardised scales are relative to; by default the funnel's own
+      # reference p0, so every funnel is centred on 0 (difference) / 1 (ratio)
+      dev_lower = lower - centre, dev_upper = upper - centre,
+      ratio_lower = lower / centre, ratio_upper = upper / centre,
       lower = pmax(lower, 0),
       level_lab = level_label(level),
       method = .env$method, phi = .env$phi_used
@@ -53,10 +55,11 @@ n_grid <- function(n_min = 20, n_max = 1e5, length_out = 400) {
 #' Limit curves for many references at once.
 #' refs: one row per reference, with `p_ref`, `n_max` and any key columns (registry, stratum...).
 build_limit_curves <- function(refs, levels = c(0.95, 0.998), method = "normal", n_min = 20) {
-  keys <- setdiff(names(refs), c("p_ref", "n_max", "phi"))
+  keys <- setdiff(names(refs), c("p_ref", "n_max", "phi", "p_centre"))
   purrr::pmap_dfr(refs, function(...) {
     r <- list(...)
-    funnel_limits(r$p_ref, n_grid(n_min, r$n_max), levels, method, phi = r$phi %||% 1) |>
+    funnel_limits(r$p_ref, n_grid(n_min, r$n_max), levels, method, phi = r$phi %||% 1,
+                  centre = r$p_centre %||% r$p_ref) |>
       dplyr::bind_cols(tibble::as_tibble(r[keys]))
   })
 }
@@ -80,7 +83,7 @@ classify_points <- function(points, levels = c(0.95, 0.998), method = "normal") 
 #
 # A device is a (high) outlier when its rate is above the UPPER control limit of its own registry at
 # its own volume n. For each outlier:
-#   delta_p        = p - p_ref                (device rate minus registry mean)
+#   delta_p        = p - p_ref                (device rate minus the reference: registry mean, or a CI bound of it)
 #   excess         = n * delta_p              (revisions above what the registry mean would give)
 # The cumulative excess revision is the sum of `excess` over all outliers.
 
@@ -136,12 +139,13 @@ outlier_summary <- function(outliers, points) {
 # phi <= 1 means no overdispersion (limits unchanged).
 estimate_phi <- function(points, winsor = 0.1) {
   points |>
-    dplyr::filter(!is.na(p), !is.na(n_total), !is.na(p_ref)) |>
+    dplyr::mutate(p0 = if ("p_mean" %in% names(points)) p_mean else p_ref) |>   # dispersion around the mean
+    dplyr::filter(!is.na(p), !is.na(n_total), !is.na(p0)) |>
     dplyr::group_by(registry) |>
     dplyr::summarise(
       n_devices_phi = dplyr::n(),
       phi = {
-        z <- (p - p_ref) / sqrt(p_ref * (1 - p_ref) / n_total)
+        z <- (p - p0) / sqrt(p0 * (1 - p0) / n_total)
         if (length(z) >= 5) {
           q <- stats::quantile(z, c(winsor, 1 - winsor))
           z <- pmin(pmax(z, q[1]), q[2])
