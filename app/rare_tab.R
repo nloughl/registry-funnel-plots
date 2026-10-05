@@ -55,7 +55,7 @@ rare_ui <- function() {
              "Ankle means: AOANJRR all A11 diagnoses pooled (same population as the A15 models); NJR 3.A3 All cases; ",
              "LROI A014B all primary ankles. Elbow means: AOANJRR ET9 total elbow (fracture + OA + RA) pooled; ",
              "NJR 3.E6 total elbow (acute trauma + elective) pooled; LROI E017B total elbow (n approximate, from E001). ",
-             "LROI reports no model-level rates (funnel only). LROI values are a manual transcription, not yet verified.")))
+             "LROI reports no model-level rates (funnel only). LROI values are a manual transcription of image tables, checked against the report.")))
     )
   )
 }
@@ -138,7 +138,11 @@ rare_server <- function(input, output, session) {
       msgs <- c(msgs, if (identical(input$rj_dx, "dx"))
         "AOANJRR stems shown per diagnosis; each is judged against its diagnosis's ET9 total-elbow rate (reference options apply to the pooled mean only)."
         else "AOANJRR stems pooled across fracture, OA and RA (n-weighted, no CI), marked [3 dx].")
-    if ("LROI" %in% m$registry) msgs <- c(msgs, "LROI values are a manual transcription, not yet verified.")
+    ex <- rj_ext()
+    unver <- unique(c(ex$device$registry[ex$device$verification %in% "unverified"],
+                      ex$casemix$registry[ex$casemix$verification %in% "unverified"]))
+    unver <- intersect(unver, m$registry)
+    if (length(unver)) msgs <- c(msgs, paste0("Values not yet verified: ", paste(unver, collapse = ", "), "."))
     if (input$rj_method == "overdispersed") {
       ph <- distinct(rj_all_points(), registry, phi)
       msgs <- c(msgs, paste0("Overdispersion factor φ: ", paste(sprintf("%s %.2f", ph$registry, ph$phi), collapse = ", "),

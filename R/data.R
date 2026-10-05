@@ -81,7 +81,7 @@ mean_row <- function(reg, p, n, source, ci = c(NA_real_, NA_real_), ci_source = 
 #'   override        lcl_pct / ucl_pct columns if filled
 #'   summary row(s)  published CI; several rows (LROI cemented + uncemented) -> pool_ci()
 #'   case-mix        AOANJRR male + female subtotal CIs -> pool_ci()
-#'   fallback        none (EPRD: mean of listed devices, no published total)
+#'   fallback        none (mean of listed devices; EPRD used this with its 2024 report)
 #' `p_ref` (the funnel reference) is the mean; set_reference() switches it to a CI bound.
 registry_means <- function(device, casemix = NULL, time_yr, overrides = NULL) {
   regs <- sort(unique(device$registry))

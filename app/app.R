@@ -106,16 +106,21 @@ uka_ui <- nav_panel(paste("Knee", paste0("(", PROCEDURE, ")")), layout_sidebar(
                   "100 excess revisions. The same n at 4.5% is inside the limit and adds 0. Screening numbers, not precise estimates."))))
   ),
   card(card_header("Registry means, 95% CI and funnel reference at this follow-up year"), tableOutput("means"),
-       card_footer(helpText("CI: published (NJR, SIRIS) or pooled from the published CIs of the parts (LROI cemented + uncemented, ",
-                            "AOANJRR male + female; approximate). EPRD has no published total, so it keeps its mean under every reference."))),
+       card_footer(helpText("CI: published (NJR, SIRIS, EPRD) or pooled from the published CIs of the parts (LROI cemented + uncemented, ",
+                            "AOANJRR male + female; approximate). A registry without a CI keeps its mean under every reference."))),
   card(card_header(textOutput("level_title")), tableOutput("level_counts"),
        card_footer(helpText("Points / rows kept (share of procedures kept) for the selected model. ",
                             "Rows without the detail a level needs are excluded, not regrouped.")))
 ))
 
 ui <- page_navbar(
-  title = "Registry revision funnel plots",
-  theme = bs_theme(version = 5, bootswatch = "flatly"),
+  title = "Registry Revision Funnel Plots",
+  theme = bs_theme(version = 5, bootswatch = "flatly",
+                   "navbar-bg"   = "#789885",   # top navbar (banner)
+                   primary       = "#2c3e50",   # buttons, active tab, slider, links
+                   "card-cap-bg" = "#eef2f5",    # card header strips (the grey bars above each plot/table)
+                   success = "#B6DFF2"
+  ),
   fillable = FALSE,
   uka_ui,
   rare_ui()
@@ -123,7 +128,7 @@ ui <- page_navbar(
 
 # -------------------------------------------------------------------------------------------- server
 server <- function(input, output, session) {
-
+  # bs_themer()
   rare_server(input, output, session)
 
   yr      <- reactive(as.numeric(input$year))

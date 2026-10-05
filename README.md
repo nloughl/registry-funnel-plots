@@ -41,9 +41,9 @@ The funnels can be centred on the registry mean or on the lower or upper 95% CI 
 Everything is standardised to the chosen reference: y = rate − reference, so the funnel stays centred on 0 and the points shift by (bound − mean). Outlier status and excess revisions, n × (rate − reference), use the chosen reference.
 
 Where each registry's CI comes from:
-- **NJR and SIRIS:** published.
+- **NJR, SIRIS and EPRD:** published (EPRD 2025 Table 57, all UKA).
 - **LROI (cemented + uncemented) and AOANJRR (male + female KP22):** pooled from the parts' published CIs. SEᵢ = (ucl − lcl)/3.92 and SE = √Σ(wᵢ·SEᵢ)², with n weights. This is approximate.
-- **EPRD:** no CI (no published total), so it keeps its mean under every reference.
+- Registries with no CI (none at present) keep their mean under every reference.
 - **Overrides:** `config/registry_means_override.csv` accepts `lcl_pct` / `ucl_pct`.
 
 The report's "Reference" section shows, for each family:
@@ -99,7 +99,7 @@ These are read from the regextract outputs `outputs/ANKLE/` and `outputs/ELBOW/`
 - **Model names** are harmonised in `config/rare_device_families.csv`. Examples: BOX/Box, S.T.A.R/Star → STAR, Coonrad/Morrey and Coonrad Morrey → Coonrad-Morrey, the NJR and AOANJRR Latitude stems → Latitude.
   - Where a registry has several rows in one family, the printed name is kept on the plot, e.g. NJR "Latitude EV Stem" and "Latitude / Latitude EV Stem".
   - AOANJRR lists Salto and Salto Talaris separately. NJR's "Salto" is matched to Salto, but it may include Talaris.
-- **LROI** gives no model-level rates for ankle or elbow, so its funnel is drawn without points. LROI values are a manual transcription that has not yet been verified.
+- **LROI** gives no model-level rates for ankle or elbow, so its funnel is drawn without points. LROI values are a manual transcription, checked against the report (NL, 2026-10-05).
 - Metrics differ between registries (AOANJRR CPR, NJR 1−KM, LROI KM percentage), so compare models against their own registry's funnel only.
 - The AOANJRR ankle periods (A14) and the LROI total-ankle-for-OA periods (A015B) are extracted, but not plotted yet.
 
@@ -177,9 +177,9 @@ To read the data from a different folder, set `REGISTRY_DATA_DIR` before startin
 ### Registry means
 For each registry, the funnel centre at `time_yr` is taken from the first of these sources that is available:
 1. A manual override in `config/registry_means_override.csv`.
-2. The registry's own summary row: NJR "All unicompartmental", SIRIS "CH average", LROI cemented + uncemented pooled by n.
+2. The registry's own summary row: NJR "All unicompartmental", SIRIS "CH average", EPRD "Unicondylar knee arthroplasties" (2025 Table 57), LROI cemented + uncemented pooled by n.
 3. Pooled case-mix subtotals: AOANJRR KP22 male + female.
-4. **Fallback**: the n-weighted mean of the listed devices. EPRD currently uses this, because the 2024 table has no UKA total row.
+4. **Fallback**: the n-weighted mean of the listed devices (no CI). No registry uses this at present; EPRD did with its 2024 report, which had no UKA total row.
 
 `mean_source` in the report says which source each registry used.
 
@@ -233,5 +233,5 @@ To add a registry, give it a colour in `REGISTRY_COLOURS` (`R/palette.R`). Plots
 ## Caveats
 - The limits treat a KM cumulative-revision estimate as a binomial proportion and ignore censoring. They are approximate, and more so when few patients remain at risk. NJR estimates with 250 or fewer at risk are drawn as open points.
 - Metrics differ between registries: CPR, 1−KM or failure rate, with different populations and revision definitions. Standardising to each registry's own mean removes level differences between registries, not definitional ones.
-- LROI values come from a manual transcription that has not yet been verified. The figure captions say so until it is.
+- LROI values come from a manual transcription of image tables, checked against the report (NL, 2026-10-05). If a registry has rows marked `unverified` (e.g. a new report year), the captions and app notes name it.
 - Fixation-segregated funnels (v1 "by fixation" section) are not included yet.

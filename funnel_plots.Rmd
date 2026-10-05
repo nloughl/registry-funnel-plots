@@ -360,9 +360,9 @@ The limits are recomputed around the chosen value, so the width changes too. Eve
 
 Where the CI comes from:
 
-* **NJR and SIRIS**: published with the summary row.
+* **NJR, SIRIS and EPRD**: published with the summary row (EPRD: 2025 Table 57, all unicondylar knee arthroplasties).
 * **LROI** (cemented + uncemented totals) and **AOANJRR** (male + female KP22 subtotals): the parts' CIs are combined into an approximate pooled CI. Each part's SE is backed out of its CI width, $SE_i = (ucl_i - lcl_i)/3.92$, and then $SE = \sqrt{\sum (w_i SE_i)^2}$ with $w_i = n_i / \sum n$.
-* **EPRD**: no CI. The 2024 table has no UKA total, and its mean is the n-weighted mean of the listed devices, so EPRD **keeps its mean** under every reference (its CI rows below repeat the mean funnel).
+* A registry with no CI (only if it falls back to the mean of its listed devices) **keeps its mean** under every reference.
 
 The registries are large, so these CIs are narrow (NJR ±0.08 percentage points). Changing the reference mainly affects devices close to a limit.
 
@@ -540,7 +540,7 @@ Instead of one registry-mean funnel, each period gets **its own funnel around it
 * **Standardised:** every period funnel is centred on 0, which shows only how the width changes, since newer periods have more procedures but fewer revisions.
 
 **Metric caveat:** K052B reports *major* revision (first revision of the femur or tibia). The device tables and the registry mean use *any* revision, so period rates are somewhat lower than device-table rates. Treat the comparison as indicative only.
-Periods without a `r T_YR`-year estimate (fewer than 50 at risk) are not drawn. LROI values are a manual transcription that has not yet been verified.
+Periods without a `r T_YR`-year estimate (fewer than 50 at risk) are not drawn. LROI values are a manual transcription of the K052B image, checked against the report.
 
 ```{r periods_data}
 periods <- period_strata(ext$casemix, T_YR)
@@ -612,7 +612,7 @@ Decisions (2026-10, also in the README):
   * By default each humeral stem's three rows are pooled, n-weighted, into one point, shown as `[3 dx]`.
   * With `elbow_by_diagnosis = TRUE`, each stem × diagnosis is a separate point, judged against that diagnosis's ET9 rate.
 * **Model names** are harmonised with `config/rare_device_families.csv`, e.g. BOX/Box, S.T.A.R/Star and Coonrad/Morrey.
-* **Metrics differ:** AOANJRR reports CPR and NJR 1−KM. LROI values are a manual transcription that has not yet been verified.
+* **Metrics differ:** AOANJRR reports CPR and NJR 1−KM. LROI values are a manual transcription of image tables, checked against the report.
 
 ```{r rare_setup}
 RT <- params$rare_time_yr
