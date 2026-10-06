@@ -1,0 +1,346 @@
+---
+title: "Leave-one-out and influence analysis of registry means: rare joints"
+author: "Naomi Loughlin"
+date: "`r format(Sys.Date())`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    code_folding: hide
+params:
+  data_dir: "../regitry-outlier-detection/outputs/UKA"   # regextract outputs (ANKLE/ and ELBOW/ are found next to it)
+  joints: ["ANKLE", "ELBOW"]
+  time_yr: 3                     # follow-up year analysed in detail
+  time_yrs: [1, 3, 5]            # follow-up years in the summary table
+  level: 0.998                   # flagging level (two-sided)
+  limit_method: "exact"          # funnel limits for the reference comparisons: "exact" (recommended) or "normal"
+  ma_test: "knha"                # CI of the random-effects mean: "knha" (Knapp-Hartung) or "z"
+  k_min: 3                       # minimum number of models for a meta-analysis
+  x_log: true
+  out_dir: "figures"
+  save_png: true
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE, fig.width = 11, fig.height = 6)
+library(dplyr)
+library(ggplot2)
+for (f in list.files("R", pattern = "\\.R$", full.names = TRUE)) source(f)
+P <- params
+T_YR <- P$time_yr
+LV <- P$level
+pct <- function(x, acc = 0.1) ifelse(is.na(x), "-", scales::percent(x, acc))
+num <- function(x, d = 2) formatC(x, digits = d, format = "f")
+JOINT_NAME <- c(ANKLE = "Total ankle", ELBOW = "Total elbow")
+save_fig <- function(p, slug, width = 11, height = 6) if (isTRUE(P$save_png))
+  save_plot(p, paste0("loo_", slug), P$out_dir, width = width, height = height)
+```
+
+# Purpose
+
+The rare-joint registries list few models: 4–13 per registry for total ankle and total elbow. The largest model often holds 30–50% of all procedures. A registry mean is then partly the rate of that one model, which causes two problems:
+
+1. **Self-masking.** A large model with a high rate pulls the mean towards itself and looks less extreme than it is.
+2. **Masking of others.** A large model with a high rate raises the reference for every other model. Other poor performers can then sit inside the funnel. A large model with a *low* rate does the opposite and makes the others look worse.
+
+This report tests how much each model drives its registry mean, using two leave-one-out methods. It then checks whether the models flagged as outliers change when the reference is recomputed without them.
+It also compares control limits for **small-volume models**, where the normal approximation used so far is poorly calibrated. Many rare-joint models have fewer than 300 procedures.
+
+The analysis is exploratory and **the app is not changed**. The decisions and their justifications are collected at the end ([Decisions](#decisions)).
+
+# Data and model inputs {#data}
+
+```{r load}
+cfg <- load_rare_config(".")
+exts <- purrr::compact(purrr::map(stats::setNames(unlist(P$joints), unlist(P$joints)), ~ load_rare(P$data_dir, .x)))
+runs <- purrr::map(exts, ~ loo_run(.x, cfg, T_YR, k_min = P$k_min, test = P$ma_test))
+runs <- purrr::compact(runs)
+skipped <- purrr::imap_chr(runs, ~ paste(.x$skipped, collapse = ", "))
+```
+
+**Models.** These are the model rows used by the rare-joint funnels: the AOANJRR supplements (A15 ankle, ET6–ET8 elbow) and NJR (3.A4 ankle, 3.E8 elbow), with model names harmonised by `config/rare_device_families.csv`.
+Registries with fewer than `r P$k_min` models, or none at all, are left out of the meta-analysis: `r paste(sprintf("%s: %s", names(skipped), ifelse(skipped == "", "none", skipped)), collapse = "; ")`. LROI publishes no model-level rates for these joints.
+
+**Each model's estimate and its uncertainty.** The meta-analysis needs a variance for each model's rate. Published rates are Kaplan-Meier cumulative revision percentages, not simple counts, so the variance is taken from the **published 95% CI**. That CI already accounts for censoring and the number still at risk. The calculation is done on the **logit** scale, $y_i = \text{logit}(p_i)$, with
+
+$$SE_i = \frac{\text{logit}(ucl_i) - \text{logit}(lcl_i)}{2 \times 1.96}.$$
+
+The logit scale keeps pooled rates between 0 and 1. It also suits KM CIs, which are asymmetric on the percent scale (wider above than below).
+
+* **AOANJRR elbow** stems are printed separately for fracture, OA and RA (ET6–ET8). As in the funnels, each stem's rows are pooled: the rate is n-weighted, and the SE is combined on the percent scale as $SE = \sqrt{\sum (w_j SE_j)^2}$ with $w_j = n_j / \sum n$, using each row's CI width / 3.92. The SE is then moved to the logit scale with the delta method, $SE_{logit} = SE_p / (p(1-p))$.
+* **Fallback.** If a row has no usable CI or a 0% estimate, the code uses a binomial approximation with a 0.5 continuity correction. No row needs it at present.
+
+```{r inputs}
+purrr::map_dfr(runs, "models") |>
+  left_join(tibble(joint = names(JOINT_NAME), joint_name = JOINT_NAME), by = "joint") |>
+  arrange(joint, registry, desc(n_total)) |>
+  transmute(joint = joint_name, registry, model, n = scales::comma(n_total),
+            `share of registry n` = pct(share_n), rate = pct(p),
+            `95% CI` = ifelse(is.na(lcl), sprintf("%s-%s", pct(plogis(yi - 1.96 * sei)), pct(plogis(yi + 1.96 * sei))),
+                              sprintf("%s-%s", pct(lcl), pct(ucl))),
+            `SE (logit)` = num(sei, 3), `SE source` = se_source,
+            `few at risk` = ifelse(low_at_risk %in% TRUE, "yes", "")) |>
+  knitr::kable(caption = paste0("Model inputs at ", T_YR, " years"))
+```
+
+# How much does one model drive the mean? {#influence}
+
+## Methods
+
+**1. Subtraction leave-one-out.** This starts from the *published* registry mean $p_{pub}$ over all $N$ procedures, which includes the unlisted "other" models. It removes model $i$'s procedures:
+
+$$p_{(-i)}^{sub} = \frac{N\,p_{pub} - n_i\,p_i}{N - n_i}$$
+
+This is the mean the registry would report without model $i$, so it keeps the same *patient-weighted* estimand as the published mean: the expected rate for a typical **patient**.
+It is an approximation. Kaplan-Meier rates do not add up exactly, because the models have different follow-up and censoring. It is the same approximation already used to pool rows in the funnels. No package is needed.
+
+**2. Meta-analytic leave-one-out (`metafor`).**
+
+* A **random-effects meta-analysis** of the model rates is fitted with `metafor::rma()`: logit scale, REML estimate of the between-model variance $\tau^2$, and `r if (P$ma_test == "knha") "the Knapp-Hartung adjustment" else "z-based"` CI for the pooled mean.
+* `metafor::leave1out()` refits the model $k$ times, each time leaving out one model.
+* `influence()` returns the diagnostics described below.
+
+The random-effects mean estimates the expected rate for a typical **model**, which is a different estimand from the published mean:
+
+* **Weights.** Each model gets weight $w_i = 1/(v_i + \tau^2)$. When the models differ (large $\tau^2$), the weights move towards equal, so a model with 45% of the procedures may get only about 30% of the weight. That limits how far one model can drive the mean.
+* **Common-effect mean.** Also shown for comparison, with $w_i = 1/v_i$ and no $\tau^2$. It is close to n-weighting.
+* **Why Knapp-Hartung.** With $k$ = 4–13 models, the z-based CI of the pooled mean is too narrow. Knapp-Hartung uses a $t_{k-1}$ distribution and a rescaled variance, which gives better coverage when $k$ is small (IntHout et al. 2014, *BMC Med Res Methodol* 14:25).
+
+## What the metrics mean {#metrics}
+
+| Metric | What it is | How to read it |
+|---|---|---|
+| **Share of n** | $n_i / N$ | How much of the registry the model is. |
+| **Weight (CE / RE)** | Share of the inverse-variance weight in the common-effect (CE) and random-effects (RE) fits | RE weight < share of n means the meta-analysis limits the model's pull. |
+| **$\tau^2$** | Between-model variance of the true logit rates | 0 means the models differ only by chance. |
+| **$I^2$** | Share of the total variation that is between models rather than sampling error | Roughly 25% = low, 50% = moderate, 75% = high heterogeneity. |
+| **$Q$, p** | Cochran's test that all models share one rate | Low power with few models, so a non-significant Q does not show the models are the same. |
+| **Prediction interval** | Where a new, typical model's rate is expected to fall (95%) | Wider than the CI of the mean. It is the meta-analytic counterpart of a funnel's width at very large n. |
+| **Leave-one-out mean** | Pooled mean refitted without model $i$ (`leave1out()`) | How far the mean moves when the model is dropped. |
+| **Externally standardised residual** (`rstudent`) | $z_i = (y_i - \hat\mu_{(-i)}) / \sqrt{v_i + \hat\tau^2_{(-i)} + \text{Var}(\hat\mu_{(-i)})}$ | The model compared with the mean of all **other** models, allowing for its own uncertainty, the heterogeneity and the uncertainty in that mean. It cannot mask itself. It is roughly N(0,1), so $|z| > 3.09$ corresponds to the 99.8% level. |
+| **DFFITS** | Change in the pooled estimate when model $i$ is removed, in standard-error units | Large \|DFFITS\| means removing the model shifts the mean noticeably. |
+| **Cook's distance** | Squared change in the pooled estimate when model $i$ is removed, scaled by the estimate's variance | Overall influence on the mean. metafor flags values above the median of $\chi^2_1$ (0.45). |
+| **Covariance ratio** | Variance of the pooled estimate without model $i$ divided by with it | Below 1: removing the model makes the mean *more* precise, a sign of an outlier. |
+| **Hat value** | The model's leverage, its share of the weight in the fit | Above $3/k$: the model alone holds a lot of the estimate. |
+| **$\tau^2$ deleted** | $\tau^2$ refitted without model $i$ | A large drop means this model accounts for much of the heterogeneity. |
+| **Influential (metafor rule)** | metafor's default flag (Viechtbauer & Cheung 2010, *Res Synth Methods* 1:112) | Flagged if any of: \|DFFITS\| > $3\sqrt{p/(k-p)}$; Cook's distance > median of $\chi^2_p$; hat > $3p/k$; or any DFBETAS > 1. Here $p = 1$ (intercept only). |
+
+## Summary across follow-up years
+
+```{r summary_years}
+yrs_tbl <- purrr::map_dfr(names(exts), function(j) purrr::map_dfr(unlist(P$time_yrs), function(t) {
+  r <- loo_run(exts[[j]], cfg, t, k_min = P$k_min, test = P$ma_test); if (is.null(r)) NULL else r$summary
+}))
+yrs_tbl |>
+  left_join(tibble(joint = names(JOINT_NAME), joint_name = JOINT_NAME), by = "joint") |>
+  arrange(joint, registry, time_yr) |>
+  transmute(joint = joint_name, registry, years = time_yr, k,
+            `published mean (95% CI)` = sprintf("%s (%s-%s)", pct(p_pub, 0.01), pct(p_lcl), pct(p_ucl)),
+            `leave-one-out range (subtraction)` = sprintf("%s-%s", pct(loo_sub_min, 0.01), pct(loo_sub_max, 0.01)),
+            `outside published CI?` = ifelse(loo_sub_min < p_lcl | loo_sub_max > p_ucl, "yes", "no"),
+            `RE mean (95% CI)` = sprintf("%s (%s-%s)", pct(p_re, 0.01), pct(p_re_lb), pct(p_re_ub)),
+            `leave-one-out range (RE)` = sprintf("%s-%s", pct(loo_re_min, 0.01), pct(loo_re_max, 0.01)),
+            `I2` = paste0(round(I2), "%"),
+            `largest model (share n / RE weight)` = sprintf("%s (%s / %s)", top_model, pct(top_share, 1), pct(top_w_re, 1))) |>
+  knitr::kable(caption = "How far the mean moves when one model is left out")
+```
+
+The **outside published CI?** column asks whether leaving out a single model moves the mean further than the registry's own 95% CI. If it does, the uncertainty in the reference from *which models are in the registry* is larger than its sampling uncertainty.
+
+## Detail at `r T_YR` years
+
+```{r detail, results = "asis", fig.width = 11, fig.height = 5.5}
+for (j in names(runs)) {
+  r <- runs[[j]]
+  cat("\n\n### ", JOINT_NAME[[j]], "\n\n", sep = "")
+  cat("\n\n#### Model rates, published mean and random-effects mean\n\n")
+  p <- plot_loo_forest(r, title = paste0(JOINT_NAME[[j]], ", ", T_YR, "-year revision by model"),
+         subtitle = "Black: published mean. Blue: random-effects mean (band = 95% CI, dotted = 95% prediction interval). Box size ~ n",
+         caption = "Orange boxes: influential by metafor's rule (Viechtbauer & Cheung 2010).")
+  print(p); save_fig(p, paste0(tolower(j), "_", T_YR, "yr_forest"), 11, 5.5)
+
+  cat("\n\n#### Registry mean without each model\n\n")
+  p <- plot_loo_means(r, title = paste0(JOINT_NAME[[j]], ": leave-one-out registry means (", T_YR, " years)"),
+         subtitle = "Grey band: published mean's 95% CI. Black line: published mean. Blue dashed: random-effects mean",
+         caption = "Green: published total minus the model (patient-weighted). Purple: random-effects mean refitted without the model (with 95% CI).")
+  print(p); save_fig(p, paste0(tolower(j), "_", T_YR, "yr_loo_means"), 11, 5.5)
+
+  cat("\n\n#### Cook's distance\n\n")
+  p <- plot_loo_cook(r, title = paste0(JOINT_NAME[[j]], ": influence on the random-effects mean (", T_YR, " years)"))
+  print(p); save_fig(p, paste0(tolower(j), "_", T_YR, "yr_cook"), 11, 4.5)
+
+  cat("\n\n#### Influence table\n\n")
+  r$models |>
+    arrange(registry, desc(n_total)) |>
+    transmute(registry, model, n = scales::comma(n_total), rate = pct(p), `share n` = pct(share_n, 1),
+              `weight CE` = pct(w_ce, 1), `weight RE` = pct(w_re, 1),
+              `mean w/o (subtr.)` = pct(loo_sub, 0.01), `change (subtr.)` = pct(d_sub, 0.01),
+              `mean w/o (RE)` = pct(loo_re, 0.01), `change (RE)` = pct(d_re, 0.01),
+              rstudent = num(rstudent), DFFITS = num(dffits), `Cook's D` = num(cook_d), `cov ratio` = num(cov_r),
+              hat = num(hat), `tau2 w/o` = num(tau2_del, 3), influential = ifelse(influential, "yes", "")) |>
+    knitr::kable(align = "llrrrrrrrrrrrrrrrl") |> print()
+
+  cat("\n\n")
+  r$summary |>
+    transmute(registry, k, `published mean` = pct(p_pub, 0.01), `common-effect mean` = pct(p_ce, 0.01),
+              `RE mean (95% CI)` = sprintf("%s (%s-%s)", pct(p_re, 0.01), pct(p_re_lb), pct(p_re_ub)),
+              `95% prediction interval` = sprintf("%s-%s", pct(pi_lb), pct(pi_ub)),
+              tau2 = num(tau2, 3), I2 = paste0(round(I2), "%"), Q = sprintf("%.1f (p = %.3f)", QE, QEp)) |>
+    knitr::kable(caption = "Meta-analysis summary") |> print()
+}
+```
+
+# Does the choice of reference change which models are flagged? {#references}
+
+Each model is compared with five references. All use the same **`r P$limit_method`** control limits at the **`r level_label(LV)`** level, built around that reference and evaluated at the model's own n:
+
+| Reference | Definition | Role |
+|---|---|---|
+| Published mean | The registry total, as in the funnels so far | Baseline |
+| Own leave-one-out (subtraction) | The published total minus this model | Removes self-masking; same patient-weighted estimand |
+| Random-effects mean | The meta-analytic mean of all models | Limits any one model's pull; model-weighted |
+| Own leave-one-out (random effects) | The random-effects mean refitted without this model | Removes self-masking *and* limits the pull of the others |
+| Lowest leave-one-out mean | The lowest subtraction leave-one-out mean in the registry | **Sensitivity bound only** (see below) |
+
+**Why the lowest leave-one-out mean is only a bound.** Leaving out the model whose removal lowers the mean most removes the strongest high-rate pull on the reference, which addresses masking of the other models. But choosing the minimum is a data-driven choice and biases the reference low, so more models are flagged high. It is reported like the case-mix extremes: a model that is high only against this reference is a weak signal, while a model that is high under every reference is robust.
+
+In the figure, each point is the model's rate minus *its own* reference. The bracket at each point is that model's own control limit, so a point outside its bracket is flagged. The panels with one shared reference also show the full funnel (grey).
+
+```{r status, results = "asis", fig.width = 11, fig.height = 13}
+status_all <- purrr::map_dfr(runs, ~ loo_status(.x, LV, P$limit_method))
+for (j in names(runs)) {
+  cat("\n\n## ", JOINT_NAME[[j]], "\n\n", sep = "")
+  st <- filter(status_all, joint == j)
+  p <- plot_loo_status(st, runs[[j]], P$x_log,
+         title = paste0(JOINT_NAME[[j]], ", ", T_YR, " years: model status under each reference (", level_label(LV), ", ", P$limit_method, " limits)"),
+         subtitle = "Point: model rate minus its own reference. Bracket: that model's own control limits. Grey funnel: shared reference",
+         caption = "Labelled: models outside their limits.")
+  print(p); save_fig(p, paste0(tolower(j), "_", T_YR, "yr_status_by_reference"), 11, 13)
+}
+```
+
+```{r status_table}
+rs_all <- purrr::map_dfr(runs, ~ loo_rstudent_status(.x, LV))
+status_all |>
+  mutate(cell = paste0(c(above = "HIGH", within = "ok", below = "low")[as.character(status)], " (", pct(dev), ")")) |>
+  select(joint, registry, model, n_total, ref, cell) |>
+  tidyr::pivot_wider(names_from = ref, values_from = cell) |>
+  left_join(select(rs_all, joint, registry, model, rstudent, rs_status = status), by = c("joint", "registry", "model")) |>
+  mutate(`meta-analytic test (z)` = paste0(c(above = "HIGH", within = "ok", below = "low")[as.character(rs_status)],
+                                           " (", num(rstudent), ")")) |>
+  left_join(tibble(joint = names(JOINT_NAME), joint_name = JOINT_NAME), by = "joint") |>
+  arrange(joint, registry, desc(n_total)) |>
+  transmute(joint = joint_name, registry, model, n = scales::comma(n_total),
+            `published` = pub, `own LOO (subtr.)` = loo_sub, `RE mean` = re, `own LOO (RE)` = loo_re,
+            `lowest LOO` = min_loo, `meta-analytic test (z)`) |>
+  knitr::kable(caption = paste0("Status at the ", level_label(LV), " level (difference from each reference). ",
+                                "ok = within limits. The meta-analytic test is described in the next section."))
+```
+
+# Limits for small-volume models {#small-volume}
+
+## Why the normal approximation fails at small n
+
+So far the funnels have used normal limits by default, $p_0 \pm z\sqrt{p_0(1-p_0)/n}$. For a binomial count, the normal approximation is poor when $n p_0$ is small, roughly below 10–20. At a 5% revision rate that is any model with fewer than about 200–400 procedures, which covers most rare-joint models:
+
+* The binomial distribution is skewed to the right at low rates. Normal limits are symmetric, so the **upper limit is too low**: models are flagged high too often.
+* The normal **lower limit** is often below 0 at small n (clipped to 0 in the plots), so a low outlier cannot be detected. This also happens with exact limits at very small n. There it is a real limitation of the data, not of the method: with a 5% rate and 50 procedures, zero revisions is still plausible.
+* The **exact** limits (Spiegelhalter 2005, *Stat Med* 24:1185) use binomial quantiles, interpolated between whole counts so the funnel is smooth. They are better calibrated at small n and match the normal limits at large n.
+
+The table shows how often each limit is actually exceeded by a model whose true rate *is* the reference (5%). The target for the `r level_label(LV)` level is `r (1 - LV) / 2 * 100`% on each side:
+
+```{r calibration}
+calib <- limit_calibration(0.05, c(25, 50, 100, 250, 500, 1000, 5000), LV)
+calib |>
+  transmute(n, method, `upper limit` = pct(upper), `lower limit` = pct(lower, 0.01),
+            `P(above upper)` = sprintf("%.4f", p_above), `P(below lower)` = sprintf("%.4f", p_below),
+            `x target (upper)` = sprintf("%.1f", p_above / target)) |>
+  knitr::kable(caption = paste0("Calibration of the ", level_label(LV), " limits for a true rate of 5% (binomial)"))
+```
+
+The **x target (upper)** column shows how many times more often than intended a model with the reference rate is flagged high. The exact limits are never worse than the normal limits and are much closer to the target at most n (e.g. 1.2× vs 7.2× at n = 25; 1.5× vs 4.3× at n = 100). Where both are equally off (n = 50, 250), the two limits fall between the same two whole counts. With a discrete count, no limit can hit the target exactly; the interpolation is designed to be right on average, not at every n. The normal limits are 2–7 times too liberal below n ≈ 250.
+
+```{r limit_methods, results = "asis", fig.width = 11, fig.height = 5.5}
+for (j in names(runs)) {
+  cat("\n\n### ", JOINT_NAME[[j]], ": normal vs exact limits\n\n", sep = "")
+  p <- plot_limit_methods(runs[[j]], LV, P$x_log,
+         title = paste0(JOINT_NAME[[j]], ", ", T_YR, " years: normal vs exact ", level_label(LV), " limits around the published mean"),
+         subtitle = "The two sets of limits differ most at small n, where most rare-joint models are")
+  print(p); save_fig(p, paste0(tolower(j), "_", T_YR, "yr_limit_methods"), 11, 5.5)
+}
+```
+
+```{r normal_vs_exact}
+purrr::map_dfr(runs, function(r) {
+  bind_rows(mutate(loo_status(r, LV, "normal"), lim = "normal"), mutate(loo_status(r, LV, "exact"), lim = "exact"))
+}) |>
+  filter(ref == "pub") |>
+  select(joint, registry, model, n_total, p, p0, lim, status) |>
+  tidyr::pivot_wider(names_from = lim, values_from = status) |>
+  filter(normal != exact) |>
+  transmute(joint = JOINT_NAME[joint], registry, model, n = n_total, rate = pct(p), `published mean` = pct(p0, 0.01),
+            `normal limits` = normal, `exact limits` = exact) |>
+  knitr::kable(caption = "Models whose status (vs the published mean) differs between normal and exact limits")
+```
+
+If the table is empty, no model changes status at this year and level. The exact limits are still the safer default.
+
+## The meta-analytic test: a third option for small volumes
+
+The externally standardised residual from `influence()` (the `rstudent` column above) is an outlier test in its own right. It differs from a funnel in three ways that matter for small models:
+
+1. **It uses each model's own published CI**, so it allows for censoring and the number still at risk. A binomial funnel uses only n and treats the KM percentage as if every patient had been followed for the full time.
+2. **It compares the model with the mean of all other models**, so the model cannot mask itself.
+3. **It allows for the real spread between models ($\tau^2$)**, so it is more conservative than a binomial funnel when the models genuinely differ. It is the meta-analytic counterpart of the overdispersed funnel.
+
+Plotted against n, it is a flat funnel: the limits are ±`r num(qnorm(1 - (1 - LV) / 2))` for the `r level_label(LV)` level (solid) and ±1.96 for 95% (dashed).
+
+```{r rstudent, results = "asis", fig.width = 11, fig.height = 5}
+for (j in names(runs)) {
+  cat("\n\n### ", JOINT_NAME[[j]], "\n\n", sep = "")
+  p <- plot_rstudent(filter(rs_all, joint == j), LV, P$x_log,
+         title = paste0(JOINT_NAME[[j]], ", ", T_YR, " years: leave-one-out standardised residuals"),
+         subtitle = paste0("Each model vs the random-effects mean of the other models. Solid: ", level_label(LV), "; dashed: 95%"))
+  print(p); save_fig(p, paste0(tolower(j), "_", T_YR, "yr_rstudent"), 11, 5)
+}
+```
+
+**Funnel or meta-analytic test?** They answer slightly different questions:
+
+* A **binomial funnel** asks whether the model is outside what chance alone would give *if it performed exactly like the reference*.
+* The **meta-analytic test** asks whether the model is outside the range of *normal model-to-model variation*.
+
+A model flagged by the funnel but not by the meta-analytic test is unusual compared with the average, but within the spread that other models also show. A model flagged by both is a strong signal.
+
+# Decisions and justifications {#decisions}
+
+| # | Decision | Justification |
+|---|---|---|
+| 1 | Analyse total ankle and total elbow, AOANJRR and NJR only | These are the registries with model-level rates. LROI has none for these joints. The UKA registries have many models and large n, so one model drives the mean much less (can be run later with the same functions). |
+| 2 | Model variance from the **published KM 95% CI**, on the logit scale | Accounts for censoring and the number at risk, which a binomial variance from n does not. The logit scale keeps pooled rates in (0, 1) and suits asymmetric KM CIs. |
+| 3 | AOANJRR elbow stems pooled across diagnoses, SE by n-weighted combination + delta method | Matches the rare-joint funnels (one point per stem). Leaving out a stem must drop all its diagnosis rows together. |
+| 4 | Two leave-one-out methods: **subtraction** and **random-effects (`metafor::leave1out`)** | Subtraction keeps the published, patient-weighted estimand and the unlisted models. The random-effects version also limits the pull of the other large models, through more equal weights. |
+| 5 | REML $\tau^2$ with **Knapp-Hartung** CIs; a common-effect fit only for comparison | REML is the recommended $\tau^2$ estimator. Knapp-Hartung gives better coverage of the pooled mean with few models (IntHout et al. 2014). The common-effect fit shows how much the n-dominant model would drive an inverse-variance mean. |
+| 6 | Influence diagnostics and the "influential" flag from `metafor::influence()` defaults | A standard, citable rule (Viechtbauer & Cheung 2010) rather than our own cut-offs. |
+| 7 | The **lowest leave-one-out mean** is reported only as a **sensitivity bound** | Choosing the minimum is data-driven and biases the reference low. Used as a bound, it identifies models that are high only under the most favourable reasonable mean. |
+| 8 | **Exact** binomial limits (Spiegelhalter 2005) for the reference comparisons | Normal limits flag models with the reference rate several times too often below n ≈ 250 (calibration table), and their lower limit is often below 0. Exact limits match the normal ones at large n, so nothing is lost for large models. |
+| 9 | The meta-analytic leave-one-out residual (`rstudent`) shown as a third flagging method | It uses each model's own CI, cannot mask itself, and allows for real between-model variation. It is the most defensible single test for few, small models. |
+| 10 | Only the report is changed; the app is unchanged | Exploratory. The choice of default reference and limits for the app should wait until these results have been reviewed. |
+
+# Caveats {#caveats}
+
+* **Few models.** With $k$ = 4–5 (elbow), $\tau^2$ is estimated imprecisely and can be 0 by chance. Influence statistics are unstable, because removing one model removes 20–25% of the data. Treat elbow results as illustrative.
+* **Two estimands.** The published and subtraction means are patient-weighted (a typical patient). The random-effects means are model-weighted (a typical model). Both are reasonable benchmarks, but they answer different questions. A model can be "average for its patients" and still sit high among the models.
+* **KM rates are not additive.** The subtraction method treats the published rate as an n-weighted average of the models' rates, which is approximately but not exactly true.
+* **Binomial funnels ignore censoring.** The exact limits fix the small-n approximation, but they still treat the KM percentage as a proportion of n. The meta-analytic test uses the published CIs and avoids this. This is one reason to give it weight.
+* **Multiple comparisons.** Each registry is tested several times (5 references × several models). The 99.8% level partly allows for this. Results are hypothesis-generating.
+* **Different populations.** AOANJRR ankle models (A15) and the A11 mean cover all diagnoses. NJR elbow models are total elbows (trauma + elective). These match the scope decisions in the main README.
+
+# References
+
+* Spiegelhalter DJ. Funnel plots for comparing institutional performance. *Stat Med* 2005;24:1185–1202.
+* Viechtbauer W, Cheung MW-L. Outlier and influence diagnostics for meta-analysis. *Res Synth Methods* 2010;1:112–125.
+* Viechtbauer W. Conducting meta-analyses in R with the metafor package. *J Stat Softw* 2010;36(3):1–48.
+* IntHout J, Ioannidis JPA, Borm GF. The Hartung-Knapp-Sidik-Jonkman method for random effects meta-analysis is straightforward and considerably outperforms the standard DerSimonian-Laird method. *BMC Med Res Methodol* 2014;14:25.
+* Higgins JPT, Thompson SG. Quantifying heterogeneity in a meta-analysis. *Stat Med* 2002;21:1539–1558.
+* Ohlssen DI, Sharples LD, Spiegelhalter DJ. A hierarchical modelling framework for identifying unusual performance in health care providers. *J R Stat Soc A* 2007;170:865–890.
