@@ -15,7 +15,7 @@ Open `registry-funnel-plots.Rproj` in RStudio and knit `funnel_plots.Rmd`. Alter
 rmarkdown::render("funnel_plots.Rmd")                                   # defaults: 3-yr, 95% + 99.8%
 rmarkdown::render("funnel_plots.Rmd", params = list(time_yr = 5, limit_method = "exact"))
 ```
-Packages: dplyr, tidyr, purrr, readr, ggplot2, ggrepel, scales, rmarkdown, knitr.
+Packages: dplyr, tidyr, purrr, readr, ggplot2, ggrepel, scales, stringr, rmarkdown, knitr; metafor for `loo_influence.Rmd`.
 Figures are written to `figures/<procedure>_<t>yr_<slug>.png`.
 
 | Parameter | Default | Meaning |
@@ -61,6 +61,47 @@ LROI Figure K052B gives the cumulative major revision of all primary UKAs by 2-y
   - a table showing which period funnels each LROI device falls outside
 - **App:** Funnel → "Registry mean + LROI funnels by procedure period".
 - **Caveat:** K052B reports *major* revision (femur or tibia), while the device tables report any revision.
+
+## Case-mix adjustment (`casemix_adjustment.Rmd`)
+A separate report. The case-mix envelope in `funnel_plots.Rmd` only shows how funnel **width** changes with patient risk. Case mix also moves the **expected rate**. For example, with a registry mean of 3% and a highest-risk class at 5%, a model's deviation should be judged against 5%, i.e. 2 points lower. That shift is much larger than the change in width, which is only about 1.28× in this example. The report shows two ways to put the shift on the plot. Each registry has three references: its mean, its lowest-risk age-sex class and its highest-risk age-sex class.
+
+- **Option A, adjusted funnels:** points stay at rate − registry mean (the observed data). Each reference gets its own funnel, centred on (p_ref − p_mean) with p_ref's width. A shaded band spans the shifted funnels of all age-sex classes.
+- **Option B, point ranges:** funnels stay centred on 0. Each model gets one deviation per reference: p − p_mean, p − p_low (top) and p − p_high (bottom). They are drawn as three markers (**B1**) or as the main point with a shaded case-mix band (**B2**). Each is read against the funnel of its own reference.
+- A and B are the same comparison drawn differently: p > upper(p_ref, n) ⇔ p − p_ref > upper(p_ref, n) − p_ref. Both are classified by `classify_casemix()`, and the report checks that they flag the same models.
+- **Status per model** (point colour): high under every reference (case mix cannot explain it) / high vs mean but not vs highest-risk class / high only vs lowest-risk class / within / the low mirror images. The report also gives excess revisions against each reference; the excess against the highest-risk class is a lower bound.
+- **Decisions:**
+  - Registries: AOANJRR (KP22) and NJR (3.K6) only, as the other registries' extracted reports have no age-sex revision table.
+  - NJR's cemented and uncemented/hybrid blocks are pooled per class, n-weighted, because fixation is a model attribute, not case mix.
+  - Classes below `min_class_n` (500) are ignored.
+- **Caveats:**
+  - These are bounds, not an adjustment. The proper method is indirect standardisation with each model's own age-sex mix, which the reports don't publish.
+  - Only age and sex are covered.
+  - KP22 covers OA only.
+- Code: `R/casemix_adjust.R`. Figures: `figures/casemix_adj_<proc>_<t>yr_*.png`. Parameters: `time_yr`, `level` (flagging level, 0.998), `levels`, `limit_method`, `detail_level`, `families`, `min_class_n`, `label_points`, `x_log`.
+
+```r
+rmarkdown::render("casemix_adjustment.Rmd")
+```
+
+## Leave-one-out and influence analysis (`loo_influence.Rmd`)
+A separate, exploratory report for the rare joints (total ankle, total elbow; AOANJRR and NJR, the registries with model-level rates). With 4–13 models per registry and the largest holding 30–50% of procedures, one model can drive the registry mean. It can hide itself (self-masking) or hide other models (masking of others). The app is unchanged.
+
+- **Subtraction leave-one-out:** p₍₋ᵢ₎ = (N·p_pub − nᵢ·pᵢ)/(N − nᵢ), taken from the published total. It is patient-weighted, like the published mean, and keeps the unlisted models. It is approximate, because KM rates are not exactly additive.
+- **Meta-analytic leave-one-out (`metafor`):**
+  - Random-effects `rma()`: logit scale, REML τ², Knapp-Hartung CI. Each model's SE comes from its **published KM 95% CI**. AOANJRR elbow stems are pooled across diagnoses, with SE from the delta method.
+  - `leave1out()` gives the means without each model.
+  - `influence()` gives the externally standardised residual (rstudent), DFFITS, Cook's distance, covariance ratio, hat value, τ² deleted, and metafor's "influential" flag (Viechtbauer & Cheung 2010).
+  - The random-effects mean is model-weighted (a typical model), not patient-weighted.
+- **Reference options compared per model:** published mean / own subtraction leave-one-out / random-effects mean / own random-effects leave-one-out / lowest leave-one-out mean. The last is a **sensitivity bound only**, because choosing the minimum is data-driven and biased low.
+- **Limits for small-volume models:**
+  - Exact binomial limits (Spiegelhalter 2005) are the default in this report. A calibration table shows that normal limits flag models with the reference rate 2–7× too often below n ≈ 250.
+  - The rstudent residual is shown as a third, meta-analytic test. It uses each model's own CI, cannot mask itself and allows for between-model variation (τ²).
+- Every metric is explained in the report, which also has a decisions table and caveats (few models, two estimands, KM non-additivity, multiple comparisons).
+- Code: `R/loo.R`. Figures: `figures/loo_*.png`. Parameters: `joints`, `time_yr`, `time_yrs`, `level`, `limit_method`, `ma_test`, `k_min`.
+
+```r
+rmarkdown::render("loo_influence.Rmd")     # needs the metafor package
+```
 
 ## Rare joints: total ankle and total elbow
 These are read from the regextract outputs `outputs/ANKLE/` and `outputs/ELBOW/`, the sibling folders of `data_dir`. Run `python -m regextract extract --procedure ANKLE` (and `ELBOW`) first.
@@ -169,6 +210,10 @@ To read the data from a different folder, set `REGISTRY_DATA_DIR` before startin
 | `app/rare_tab.R` | Rare joints tab of the app |
 | `config/rare_joint_means.csv` | Which rows give each registry's rare-joint mean |
 | `config/rare_device_families.csv` | Harmonised rare-joint model names |
+| `R/casemix_adjust.R` | Case-mix adjustment report: class rates, shifted / centred reference funnels, `classify_casemix()`, option A and B plots |
+| `casemix_adjustment.Rmd` | Case-mix adjustment report (adjusted funnels and model point ranges) |
+| `R/loo.R` | Leave-one-out / influence report: model inputs (SE from KM CI), `loo_fit()` (metafor), `loo_status()`, calibration, plots |
+| `loo_influence.Rmd` | Leave-one-out and influence analysis of rare-joint registry means |
 | `R/levels.R` | Detail levels: `derive_attributes()`, `pool_to_level()`, `level_counts()` |
 | `config/device_families.csv` | Regex that groups each registry's device labels into families/brands (Oxford, ZUK, ...) |
 | `config/device_attributes.csv` | Rules for fixation / bearing / material / tibia, each marked stated or design |
@@ -192,7 +237,7 @@ Axis windows are worked out for each plot by `dynamic_ranges()` in `R/plots.R`:
 - To fix a window by hand, pass `xlim` / `ylim`.
 
 ### Case mix
-Case-mix limits are drawn per **age-sex class**, e.g. `<55 Female` or `>=75 Male`. That gives 8 classes per registry or design block, in paired colours: one hue per age group, dark for female and light for male.
+Case-mix limits are drawn per **age-sex class**, e.g. `<55 Female` or `>=75 Male`. That gives 8 classes per registry or design block, in paired colours: one hue per age group, dark for female and light for male. The envelope here shows width only; see `casemix_adjustment.Rmd` for funnels shifted to each class's rate.
 
 ### Outlier reporting
 Each device-family plot at 99.8% has two tables underneath:

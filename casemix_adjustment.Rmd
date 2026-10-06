@@ -1,0 +1,265 @@
+---
+title: "Case-mix adjustment of funnel plots: `r params$procedure` `r params$time_yr`-year revision"
+author: "Naomi Loughlin"
+date: "`r format(Sys.Date())`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    code_folding: hide
+params:
+  data_dir: "../regitry-outlier-detection/outputs/UKA"   # regextract outputs
+  procedure: "UKA"
+  time_yr: 3                     # follow-up year (age-sex tables exist at 1, 3, 5 and 10 years)
+  level: 0.998                   # control-limit level used to flag models
+  levels: [0.95, 0.998]          # levels drawn (one figure set per level)
+  limit_method: "normal"         # "normal" or "exact" (binomial, Spiegelhalter 2005)
+  detail_level: 0                # 0 = rows as listed, 1 = brand, 2 = + fixation, 3 = + attribute
+  level3_attr: "bearing"
+  attribute_source: "stated"
+  families: ["Oxford"]           # extra per-family figures (all models are always shown)
+  min_class_n: 500               # ignore age-sex classes with fewer procedures (noisy extremes)
+  label_points: "flagged"        # "flagged" (high under any reference, or low under every reference), "all" or "none"
+  x_log: true                    # log volume axis
+  out_dir: "figures"
+  save_png: true
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE, fig.width = 11, fig.height = 6)
+library(dplyr)
+library(ggplot2)
+for (f in list.files("R", pattern = "\\.R$", full.names = TRUE)) source(f)
+P <- params
+T_YR <- P$time_yr
+LEVELS <- unlist(P$levels)
+LV <- P$level
+pct <- function(x, acc = 0.1) scales::percent(x, acc)
+save_fig <- function(p, slug, width = 11, height = 6) if (isTRUE(P$save_png))
+  save_plot(p, paste0("casemix_adj_", tolower(P$procedure), "_", T_YR, "yr_", slug), P$out_dir, width = width, height = height)
+```
+
+# Why adjust for case mix?
+
+A model's revision rate depends on the patients it is used in as well as on the implant. Younger patients are revised more often after UKA than older patients, so a model used mostly in under-55s will look worse than the registry mean even if it performs as well as any other model for those patients.
+
+The funnel plots in the main report compare each model with its registry's **mean** rate. That mean reflects the registry's overall age-sex mix. The case-mix *envelope* in the main report centres every age-sex class's funnel on 0, so it only shows how the funnel's **width** changes with the patients' risk.
+
+The width change is small. Most of the case-mix effect is in the **location** of the comparison. In the example from the discussion, the registry mean is 3% and the highest-risk class is 5%. A model with a 6% rate is 3 points above the mean but only 1 point above what a model used only in highest-risk patients would be expected to show. Its funnel is only about 28% wider at 5% than at 3% ($\sqrt{0.05 \cdot 0.95 / (0.03 \cdot 0.97)} \approx 1.28$). The 2-point shift in the centre is the larger effect.
+
+This report shows two ways to put the location shift on the plot. Both use the same three references per registry:
+
+* **Registry mean** $p_{mean}$: the comparison used in the main report.
+* **Lowest-risk class** $p_{low}$: the age-sex class with the lowest `r T_YR`-year revision rate. This is the best case for the patients, so a model judged against it looks *worse*.
+* **Highest-risk class** $p_{high}$: the age-sex class with the highest rate. This is the worst case for the patients, so a model judged against it looks *better*.
+
+# Data
+
+```{r load}
+ext <- load_extraction(P$data_dir, P$procedure)
+families  <- load_families("config/device_families.csv")
+overrides <- readr::read_csv("config/registry_means_override.csv", comment = "#", show_col_types = FALSE)
+attr_rules <- load_attribute_rules("config/device_attributes.csv")
+
+means <- registry_means(ext$device, ext$casemix, T_YR, overrides) |> set_reference("mean")
+classes <- casemix_classes(ext$casemix, T_YR, min_n = P$min_class_n)
+cm_ext  <- casemix_extremes(classes, means)
+CM_REGS <- cm_ext$registry
+
+rows <- device_points(ext$device, means, T_YR, families) |>
+  derive_attributes(attr_rules, P$attribute_source)
+points <- pool_to_level(rows, P$detail_level, P$level3_attr) |>
+  filter(registry %in% CM_REGS)
+cl <- classify_casemix(points, cm_ext, LV, P$limit_method)
+```
+
+Case-mix tables by age and sex are extracted for **`r paste(CM_REGS, collapse = " and ")`** only:
+
+* **AOANJRR** Table KP22 (CPR of primary UKA for OA by sex and age).
+* **NJR** Table 3.K6. Its cemented and uncemented/hybrid blocks are pooled per age-sex class (n-weighted).
+
+The other registries (`r paste(setdiff(means$registry, CM_REGS), collapse = ", ")`) publish no age-sex revision table in the extracted reports, so they are not in this report.
+Points are at **`r level_title(P$detail_level, P$level3_attr)`**. Models are flagged at the **`r level_label(LV)`** limits, using `r P$limit_method` limits.
+
+## Age-sex class rates
+
+```{r classes}
+classes |>
+  left_join(select(cm_ext, registry, low_class, high_class, p_mean), by = "registry") |>
+  arrange(registry, p) |>
+  transmute(registry, class, n = scales::comma(n_total), rate = pct(p, 0.01),
+            `minus registry mean` = pct(p - p_mean, 0.01),
+            role = case_when(class == low_class ~ "lowest risk", class == high_class ~ "highest risk", TRUE ~ ""),
+            source = table_id) |>
+  knitr::kable(caption = paste0(T_YR, "-year revision by age-sex class"))
+```
+
+```{r extremes}
+cm_ext |>
+  transmute(registry,
+            `registry mean` = pct(p_mean, 0.01),
+            `classes pooled (check)` = pct(p_classes_pooled, 0.01),
+            `lowest-risk class` = sprintf("%s: %s", low_class, pct(p_low, 0.01)),
+            `highest-risk class` = sprintf("%s: %s", high_class, pct(p_high, 0.01)),
+            `shift down (mean - low)` = pct(p_mean - p_low, 0.01),
+            `shift up (high - mean)` = pct(p_high - p_mean, 0.01),
+            `width ratio high/mean` = sprintf("%.2f", sqrt(p_high * (1 - p_high) / (p_mean * (1 - p_mean))))) |>
+  knitr::kable(caption = "References per registry")
+```
+
+The **classes pooled** column is the n-weighted average of the class rates. It should be close to the registry mean. If it is not, the age-sex table covers a different population from the registry mean. For example, KP22 covers OA only, and the NJR mean is the "All unicompartmental" row.
+The last column shows how much wider the highest-risk funnel is than the registry-mean funnel. The shift columns are far larger than that change in width.
+
+# Option A: adjusted funnels {#option-a}
+
+**What it shows.** The model points stay where they are in the main report, at *model rate − registry mean*. What moves is the funnel. Each reference gets its own funnel, centred on its rate relative to the registry mean, $p_{ref} - p_{mean}$, and with the width that rate implies:
+
+$$\text{limits}_{ref}(n) = p_{ref} \pm z\sqrt{p_{ref}(1-p_{ref})/n} \; - \; p_{mean}$$
+
+The highest-risk funnel (red, dashed) sits above 0, the lowest-risk funnel (blue, dashed) below it, and the registry-mean funnel (black) on 0.
+The shaded bands span the shifted limits of **all** age-sex classes. The red band covers the upper limits and the blue band the lower limits, so the band edges are the lowest- and highest-risk funnels.
+
+**Justification.**
+
+* The points are the observed data, and they are the same in every figure. Only the expectation changes, and case mix is an uncertainty about the expectation, not about the observation.
+* One plot shows, for every model at once, the range of comparisons that case mix could justify.
+* This is the same approach as the main report's "upper/lower 95% CI of the mean" reference: the reference moves and the points are read against it.
+* It works with many age-sex classes (the band), not just the two extremes.
+
+**How to read it.** A point above the **red** dashed line is above the upper limit even if every patient were in the highest-risk class, so case mix by age and sex cannot explain it. A point above the black line but below the red line is high compared with the mean, but its patients' age-sex mix could plausibly account for it. A point above only the blue line would be flagged only if its patients were all low-risk.
+
+```{r option_a_data}
+n_max <- max(cl$n_total) * 1.5
+curves_shift <- cm_ref_curves(cm_ext, LEVELS, P$limit_method, n_max, shifted = TRUE)
+env_shift    <- cm_class_envelope(classes, means, LEVELS, P$limit_method, n_max, shifted = TRUE)
+curves_width <- cm_ref_curves(cm_ext, LEVELS, P$limit_method, n_max, shifted = FALSE)
+src_note <- paste0("Age-sex classes: ", paste(sprintf("%s %s", cm_ext$registry, cm_ext$table_id), collapse = "; "),
+                   ". ", P$limit_method, " limits; points at ", level_title(P$detail_level, P$level3_attr), ".")
+fams <- intersect(unlist(P$families), unique(cl$family))
+```
+
+```{r option_a, results = "asis", fig.width = 12, fig.height = 6.5}
+for (lv in LEVELS) {
+  cat("\n\n## All models,", level_label(lv), "limits\n\n")
+  p <- plot_cm_adjusted(cl, curves_shift, env_shift, lv, P$label_points, P$x_log,
+         title = paste0(P$procedure, " ", T_YR, "-year revision: case-mix adjusted funnels (", level_label(lv), ")"),
+         subtitle = "Funnels shifted to each reference's rate; shaded = all age-sex classes; points = model rate - registry mean",
+         caption = paste("Point colour: status at the", level_label(LV), "limits.", src_note))
+  print(p); save_fig(p, paste0("adjusted_funnels_", lv * 1000), 12, 6.5)
+}
+for (fam in fams) {
+  cat("\n\n## ", fam, ", ", level_label(LV), " limits\n\n", sep = "")
+  p <- plot_cm_adjusted(filter(cl, family == fam), curves_shift, env_shift, LV, "all", P$x_log,
+         title = paste0(fam, ": case-mix adjusted funnels (", level_label(LV), ")"), caption = src_note)
+  print(p); save_fig(p, paste0("adjusted_funnels_", gsub("[^a-z0-9]+", "_", tolower(fam)), "_", LV * 1000), 12, 6.5)
+}
+```
+
+# Option B: model point ranges {#option-b}
+
+**What it shows.** Here the funnels stay centred on 0, as in the main report. What moves is the point. Each model gets one deviation per reference:
+
+* $d_{mean} = p - p_{mean}$, the main point, the same as in the main report;
+* $d_{low} = p - p_{low}$, the deviation if all its patients were lowest-risk. This is the top of the range;
+* $d_{high} = p - p_{high}$, the deviation if all its patients were highest-risk. This is the bottom of the range.
+
+Each deviation is read against the funnel *width* of its own reference: the black funnel for $d_{mean}$, blue for $d_{low}$ and red for $d_{high}$. The funnels differ only slightly in width, because the location shift is now carried by the points.
+
+Two ways to draw it:
+
+* **B1, separate markers.** Three markers per model, joined by a grey line: a circle (vs mean), a blue up-triangle (vs lowest risk) and a red down-triangle (vs highest risk). Each marker is compared with the funnel of its own colour. This is the most literal display, because every number is on the plot. With many models it gets busy.
+* **B2, point with a case-mix band.** The main point (vs mean), coloured by status, with a shaded band from $d_{high}$ to $d_{low}$. The blue and red ticks at the band's ends are compared with the blue and red funnels. It reads like a confidence interval, but it is **not** sampling uncertainty. It is the range of deviations that the age-sex mix alone could produce.
+
+**Justification.**
+
+* The deviation of each model, the quantity the paper reports, is shown directly with its case-mix range. That suits figures and tables that discuss individual models.
+* The length of the range is the same for every model in a registry ($p_{high} - p_{low}$). So the plot also shows how large case mix is compared with the spread of the models.
+* It uses only the two extreme classes. Intermediate classes would sit inside the band.
+
+```{r option_b, results = "asis", fig.width = 12, fig.height = 6.5}
+for (lv in LEVELS) {
+  for (st in c("markers", "band")) {
+    cat("\n\n## ", if (st == "markers") "B1 separate markers" else "B2 case-mix band", ", all models, ",
+        level_label(lv), " limits\n\n", sep = "")
+    p <- plot_cm_ranges(cl, curves_width, lv, st, P$label_points, P$x_log,
+           title = paste0(P$procedure, " ", T_YR, "-year revision: model deviation by reference (", level_label(lv), ")"),
+           subtitle = if (st == "markers") "Circle: vs registry mean; triangles: vs lowest-risk (up) / highest-risk (down) class; each read against the funnel of its colour"
+                      else "Point: vs registry mean; band: range from highest-risk (bottom, red tick) to lowest-risk (top, blue tick) reference",
+           caption = paste("Funnels centred on 0 (width of each reference).", src_note))
+    print(p); save_fig(p, paste0("point_ranges_", st, "_", lv * 1000), 12, 6.5)
+  }
+}
+for (fam in fams) {
+  for (st in c("markers", "band")) {
+    cat("\n\n## ", fam, ", ", if (st == "markers") "B1" else "B2", ", ", level_label(LV), " limits\n\n", sep = "")
+    p <- plot_cm_ranges(filter(cl, family == fam), curves_width, LV, st, "all", P$x_log,
+           title = paste0(fam, ": model deviation by reference (", level_label(LV), ")"), caption = src_note)
+    print(p); save_fig(p, paste0("point_ranges_", st, "_", gsub("[^a-z0-9]+", "_", tolower(fam)), "_", LV * 1000), 12, 6.5)
+  }
+}
+```
+
+# A and B give the same answer {#equivalence}
+
+The two options are the same comparison drawn two ways. For any reference rate $p_{ref}$:
+
+$$p > \text{upper}(p_{ref}, n) \iff p - p_{ref} > \text{upper}(p_{ref}, n) - p_{ref}$$
+
+Option A draws the left-hand side, with the point fixed and the funnel shifted. Option B draws the right-hand side, with the point shifted and the funnel centred on 0. Both are classified by the same function (`classify_casemix()` in `R/casemix_adjust.R`), so the two options always flag exactly the same models. The choice between them is only about what the figure should emphasise:
+
+| | Option A: adjusted funnels | Option B: point ranges |
+|---|---|---|
+| What moves | the funnel (expectation) | the point (deviation) |
+| Points | observed data, unchanged from the main report | one deviation per reference |
+| Case-mix classes used | all (shaded band) + both extremes | the two extremes |
+| Best for | screening all models at once; the methods figure | discussing individual models; showing how big case mix is compared with model differences |
+| Weak spot | the reader has to compare each point with three funnels | busy with many models (B1); the band can be mistaken for a CI (B2) |
+
+```{r equivalence_check}
+# numerical check: option-B deviations against centred limits give the same flags as option-A limits
+chk <- cl |> mutate(
+  B_high = d_high > (up_high - p_high), B_mean = d_mean > (up_mean - p_mean), B_low = d_low > (up_low - p_low))
+stopifnot(identical(chk$B_high, chk$above_high), identical(chk$B_mean, chk$above_mean), identical(chk$B_low, chk$above_low))
+cat("Option A and option B flag the same models:", nrow(chk), "models checked.\n")
+```
+
+# Model status {#status}
+
+Each model's status at the `r level_label(LV)` limits (the point colour in the figures):
+
+| Status | Meaning |
+|---|---|
+| High under every reference | above the upper limit even against the highest-risk class; age-sex case mix cannot explain it |
+| High vs mean, not vs highest-risk class | flagged in the main report, but a high-risk patient mix could account for it |
+| High only vs lowest-risk class | not flagged in the main report; would be if its patients were all low-risk |
+| Within under every reference | inside the limits whatever the age-sex mix |
+| Low ... | the mirror image for low (better-than-expected) models |
+
+```{r status_table}
+cl |>
+  arrange(cm_status, desc(d_mean)) |>
+  transmute(registry, model = label, n = scales::comma(n_total), rate = pct(p),
+            `vs mean` = pct(d_mean), `vs lowest-risk` = pct(d_low), `vs highest-risk` = pct(d_high),
+            status = as.character(cm_status)) |>
+  knitr::kable(caption = paste0("Deviation from each reference and status at the ", level_label(LV), " limits"))
+```
+
+```{r summary_table}
+casemix_summary(cl) |>
+  mutate(across(starts_with("excess"), ~ round(.x, 1))) |>
+  knitr::kable(caption = paste0(
+    "Models above (high_) / below (low_) the ", level_label(LV), " limits under each reference, and the excess revisions ",
+    "of the high models, n x (rate - reference), counted only for models above that reference's upper limit"))
+```
+
+The excess revisions against the highest-risk class are a **lower bound** for each registry: these excess revisions remain even under the least favourable patient mix. The excess against the lowest-risk class is the corresponding upper bound.
+
+# Caveats {#caveats}
+
+* **These are bounds, not an adjustment.** No model is used only in one age-sex class. The true expected rate for a model lies somewhere between $p_{low}$ and $p_{high}$, set by its own case mix. The proper adjustment is **indirect standardisation**: the expected rate is $\sum_c w_c\,p_c$, where $w_c$ is the share of the model's patients in class $c$. The extracted reports do not publish case mix per model, so that is not possible here. With per-model age-sex counts (e.g. from a registry data request), Option A would collapse to one funnel per model and Option B to one point per model.
+* **The extremes are wide.** The lowest- and highest-risk classes are the two ends of the age-sex distribution, so most models' plausible range is much narrower than shown. The status categories are deliberately conservative. "High under every reference" is a strong signal; "High vs mean, not vs highest-risk class" is hypothesis-generating.
+* **Only age and sex.** Diagnosis, medial vs lateral compartment, surgeon and hospital volume, BMI and activity also affect revision, and none of them is in these tables.
+* **NJR fixation blocks are pooled.** NJR 3.K6 splits each age-sex class into cemented and uncemented/hybrid. Fixation is a model attribute, not a patient characteristic. Adjusting a cemented model against the cemented-only class rates would partly remove the effect of the design being screened, so the blocks are pooled per class (n-weighted).
+* **Different populations.** AOANJRR KP22 covers primary UKA for OA, while the device table and the registry mean cover all diagnoses. The NJR class tables and the "All unicompartmental" mean may also differ slightly in scope. The "classes pooled (check)" column above shows the size of the mismatch.
+* **Extremes are chosen by observed rate.** The highest-risk class is the class with the highest observed rate, which is partly chance. With `min_class_n` = `r P$min_class_n`, classes below that size are ignored. All classes in AOANJRR and NJR are far larger.
+* **Limits treat the Kaplan-Meier estimate as a binomial proportion** and ignore censoring, as in the main report.
