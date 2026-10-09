@@ -15,12 +15,16 @@
 #   loo_sub  the model's own subtraction leave-one-out mean
 #   re       random-effects pooled mean (all models)
 #   loo_re   the model's own random-effects leave-one-out mean
-#   min_loo  the lowest subtraction leave-one-out mean in the registry (sensitivity bound)
+#   min_loo  the lowest subtraction leave-one-out mean in the registry
+#   min_loo_re the lowest random-effects (metafor) leave-one-out mean in the registry: the "least
+#            upward-biased" mean recommended in supervisor guidance (2026-10) for registries with few models
 
 LOO_REFS <- c(pub = "Published mean", loo_sub = "Own leave-one-out (subtraction)",
               re = "Random-effects mean", loo_re = "Own leave-one-out (random effects)",
-              min_loo = "Lowest leave-one-out mean (sensitivity)")
-LOO_REF_COLOURS <- c(pub = "#222222", loo_sub = "#1B9E77", re = "#2166AC", loo_re = "#7570B3", min_loo = "#D95F02")
+              min_loo = "Lowest leave-one-out mean (subtraction)",
+              min_loo_re = "Lowest leave-one-out mean (random effects)")
+LOO_REF_COLOURS <- c(pub = "#222222", loo_sub = "#1B9E77", re = "#2166AC", loo_re = "#7570B3", min_loo = "#D95F02",
+                     min_loo_re = "#E7298A")
 LOO_STATUS_COLOURS <- c(above = "#B2182B", within = "#9E9E9E", below = "#2166AC")
 
 #' Model rows for one joint at time_yr, with logit estimates and variances.
@@ -76,7 +80,7 @@ loo_models <- function(ext, cfg, time_yr, z = stats::qnorm(0.975)) {
 loo_fit <- function(md, N, p_pub, test = "knha") {
   md <- dplyr::arrange(md, dplyr::desc(n_total))
   k <- nrow(md)
-  re <- metafor::rma(yi, vi, data = md, method = "REML", test = test)
+  re <- metafor::rma(yi, vi, data = md, slab = model, method = "REML", test = test)   # slab: model names for metafor's own plots
   ce <- metafor::rma(yi, vi, data = md, method = "EE")
   l1 <- as.data.frame(metafor::leave1out(re, transf = stats::plogis))
   inf <- stats::influence(re)   # S3 method influence.rma.uni from metafor
@@ -95,7 +99,7 @@ loo_fit <- function(md, N, p_pub, test = "knha") {
       tau2_without = l1$tau2, I2_without = l1$I2,
       rstudent = infd$rstudent, dffits = infd$dffits, cook_d = infd$cook.d,
       cov_r = infd$cov.r, hat = infd$hat, tau2_del = infd$tau2.del,
-      influential = as.character(infd$inf) == "*")
+      influential = as.character(infd$inf) %in% "*")
   summ <- tibble::tibble(
     k = k, N = N, p_pub = p_pub,
     p_re = stats::plogis(re$b[1]), p_re_lb = stats::plogis(re$ci.lb), p_re_ub = stats::plogis(re$ci.ub),
@@ -105,6 +109,7 @@ loo_fit <- function(md, N, p_pub, test = "knha") {
     loo_sub_min = min(models$loo_sub), loo_sub_max = max(models$loo_sub),
     loo_re_min = min(models$loo_re), loo_re_max = max(models$loo_re),
     drop_for_min = models$model[which.min(models$loo_sub)],
+    drop_for_min_re = models$model[which.min(models$loo_re)],
     top_model = models$model[which.max(models$share_n)], top_share = max(models$share_n),
     top_w_re = models$w_re[which.max(models$share_n)])
   list(re = re, ce = ce, models = models, summary = summ)
@@ -132,13 +137,14 @@ loo_run <- function(ext, cfg, time_yr, k_min = 3, test = "knha") {
 #' method: funnel limit method ("exact" recommended for small volumes); level: flagging level.
 loo_status <- function(run, level = 0.998, method = "exact") {
   mods <- run$models |>
-    dplyr::left_join(dplyr::select(run$summary, registry, p_pub, p_re, loo_sub_min), by = "registry")
+    dplyr::left_join(dplyr::select(run$summary, registry, p_pub, p_re, loo_sub_min, loo_re_min), by = "registry")
   long <- dplyr::bind_rows(
     dplyr::mutate(mods, ref = "pub",     p0 = p_pub),
     dplyr::mutate(mods, ref = "loo_sub", p0 = loo_sub),
     dplyr::mutate(mods, ref = "re",      p0 = p_re),
     dplyr::mutate(mods, ref = "loo_re",  p0 = loo_re),
-    dplyr::mutate(mods, ref = "min_loo", p0 = loo_sub_min))
+    dplyr::mutate(mods, ref = "min_loo", p0 = loo_sub_min),
+    dplyr::mutate(mods, ref = "min_loo_re", p0 = loo_re_min))
   lim <- purrr::map2_dfr(long$p0, long$n_total, function(p0, n) {
     l <- funnel_limits(p0, n, level, method); tibble::tibble(lower = l$lower, upper = l$upper,
                                                              dev_lower = l$dev_lower, dev_upper = l$dev_upper)
@@ -209,7 +215,8 @@ plot_loo_forest <- function(run, ...) {
 }
 
 #' Leave-one-out plot: the registry mean recomputed without each model, by both methods.
-plot_loo_means <- function(run, ...) {
+#' methods: which leave-one-out means to draw, "loo_sub" (subtraction) and/or "loo_re" (metafor).
+plot_loo_means <- function(run, methods = c("loo_sub", "loo_re"), ...) {
   md <- run$models |>
     dplyr::group_by(registry) |>
     dplyr::mutate(model = factor(model, levels = rev(model[order(-n_total)]))) |>
@@ -220,11 +227,12 @@ plot_loo_means <- function(run, ...) {
                        inherit.aes = FALSE, fill = "grey50", alpha = 0.15) +
     ggplot2::geom_vline(data = s, ggplot2::aes(xintercept = p_pub), colour = LOO_REF_COLOURS[["pub"]], linewidth = 0.7) +
     ggplot2::geom_vline(data = s, ggplot2::aes(xintercept = p_re), colour = LOO_REF_COLOURS[["re"]], linewidth = 0.7, linetype = "22") +
-    ggplot2::geom_errorbarh(ggplot2::aes(xmin = loo_re_lb, xmax = loo_re_ub), height = 0.2,
-                            colour = LOO_REF_COLOURS[["loo_re"]], alpha = 0.6) +
-    ggplot2::geom_point(ggplot2::aes(x = loo_re, colour = "loo_re"), size = 2.6, shape = 17) +
-    ggplot2::geom_point(ggplot2::aes(x = loo_sub, colour = "loo_sub"), size = 2.6) +
-    ggplot2::scale_colour_manual(values = LOO_REF_COLOURS[c("loo_sub", "loo_re")], labels = LOO_REFS[c("loo_sub", "loo_re")],
+    (if ("loo_re" %in% methods) list(
+      ggplot2::geom_errorbarh(ggplot2::aes(xmin = loo_re_lb, xmax = loo_re_ub), height = 0.2,
+                              colour = LOO_REF_COLOURS[["loo_re"]], alpha = 0.6),
+      ggplot2::geom_point(ggplot2::aes(x = loo_re, colour = "loo_re"), size = 2.6, shape = 17))) +
+    (if ("loo_sub" %in% methods) ggplot2::geom_point(ggplot2::aes(x = loo_sub, colour = "loo_sub"), size = 2.6)) +
+    ggplot2::scale_colour_manual(values = LOO_REF_COLOURS[methods], labels = LOO_REFS[methods],
                                  name = "Mean without this model") +
     ggplot2::scale_x_continuous(labels = scales::percent_format(accuracy = 0.1)) +
     ggplot2::facet_wrap(ggplot2::vars(registry), scales = "free") +
@@ -254,7 +262,7 @@ plot_loo_cook <- function(run, ...) {
 #' (published, random effects, lowest leave-one-out) also show the full funnel.
 plot_loo_status <- function(st, run, x_log = TRUE, label = TRUE, ...) {
   shared <- st |>
-    dplyr::filter(ref %in% c("pub", "re", "min_loo")) |>
+    dplyr::filter(ref %in% c("pub", "re", "min_loo", "min_loo_re")) |>
     dplyr::distinct(registry, ref, p0, level, method)
   nmax <- max(st$n_total) * 1.4
   curves <- purrr::pmap_dfr(shared, function(registry, ref, p0, level, method) {
@@ -330,5 +338,77 @@ plot_rstudent <- function(rs, level = 0.998, x_log = TRUE, ...) {
     ggplot2::facet_wrap(ggplot2::vars(registry), scales = "free_x") +
     ggplot2::labs(x = "Procedure volume (n)",
                   y = "Leave-one-out standardised residual (z)", ...) +
+    theme_funnel()
+}
+
+# lower control limits for screening ------------------------------------------------------------------
+
+#' Power: probability that a model whose true rate is `ratio` x the reference is above the upper limit,
+#' for each level and n (binomial; the limits use the reference p0).
+limit_power <- function(p0, ratio, n, levels, method = "exact") {
+  tidyr::crossing(n = n, level = levels, ratio = ratio) |>
+    dplyr::mutate(upper = purrr::pmap_dbl(list(n, level), function(nn, lv) funnel_limits(p0, nn, lv, method)$upper),
+                  p_true = pmin(p0 * ratio, 0.999),
+                  power = 1 - stats::pbinom(floor(upper * n + 1e-9), n, p_true),
+                  false_alarm = 1 - stats::pbinom(floor(upper * n + 1e-9), n, p0))
+}
+
+#' Highest level whose upper (or lower) limit each model is outside, for several references.
+screen_status <- function(run, levels, refs = c("pub", "min_loo_re"), method = "exact") {
+  lv <- sort(levels, decreasing = TRUE)
+  st <- purrr::map_dfr(lv, function(l) loo_status(run, l, method)) |>
+    dplyr::filter(ref %in% refs)
+  st |>
+    dplyr::group_by(joint, registry, model, ref) |>
+    dplyr::summarise(n_total = dplyr::first(n_total), p = dplyr::first(p), p0 = dplyr::first(p0), dev = dplyr::first(dev),
+                     above = if (any(status == "above")) max(level[status == "above"]) else NA_real_,
+                     below = if (any(status == "below")) max(level[status == "below"]) else NA_real_,
+                     .groups = "drop") |>
+    dplyr::mutate(screen = dplyr::case_when(
+                    !is.na(above) ~ paste("above", level_label(above)),
+                    !is.na(below) ~ paste("below", level_label(below)),
+                    TRUE ~ paste("within", level_label(min(levels)))),
+                  ref = factor(ref, levels = names(LOO_REFS)))
+}
+
+#' Funnel plots with several (lower) control limits, one row per reference and one column per registry.
+#' Points are coloured by the highest level whose limit they are outside.
+plot_screen_funnels <- function(ss, run, levels, method = "exact", x_log = TRUE, ...) {
+  refs <- ss |> dplyr::distinct(registry, ref, p0)
+  # shared references only: one p0 per registry x ref
+  stopifnot(!any(duplicated(dplyr::select(refs, registry, ref))))
+  nmax <- max(ss$n_total) * 1.4
+  xr <- range(ss$n_total) * c(0.6, 1.5)
+  curves <- purrr::pmap_dfr(refs, function(registry, ref, p0) {
+    funnel_limits(p0, n_grid(10, nmax), levels, method) |> dplyr::mutate(registry = registry, ref = ref)
+  }) |>
+    dplyr::filter(n >= xr[1]) |>
+    dplyr::mutate(ref = factor(ref, levels = names(LOO_REFS)), lvl = factor(level_label(level), levels = level_label(sort(levels))))
+  lv_sorted <- sort(levels, decreasing = TRUE)
+  cats <- c(paste("above", level_label(lv_sorted)), paste("within", level_label(min(levels))),
+            paste("below", level_label(rev(rev(lv_sorted)))))
+  reds <- grDevices::colorRampPalette(c("#B2182B", "#F4A582"))(length(levels))
+  blues <- grDevices::colorRampPalette(c("#2166AC", "#92C5DE"))(length(levels))
+  cols <- stats::setNames(c(reds, "#9E9E9E", blues), cats)
+  ltys <- stats::setNames(c("solid", "42", "13", "1111")[seq_along(levels)], level_label(sort(levels)))
+  ss <- dplyr::mutate(ss, screen = factor(screen, levels = cats))
+  lab <- dplyr::filter(ss, !startsWith(as.character(screen), "within"))
+  ggplot2::ggplot() +
+    ggplot2::geom_line(data = curves, ggplot2::aes(x = n, y = dev_upper, linetype = lvl, group = interaction(registry, ref, lvl))) +
+    ggplot2::geom_line(data = curves, ggplot2::aes(x = n, y = dev_lower, linetype = lvl, group = interaction(registry, ref, lvl))) +
+    ggplot2::geom_hline(yintercept = 0, linewidth = 0.3, colour = "grey50") +
+    ggplot2::geom_point(data = ss, ggplot2::aes(x = n_total, y = dev, fill = screen), shape = 21, size = 2.7,
+                        colour = "grey15", stroke = 0.3) +
+    ggrepel::geom_text_repel(data = lab, ggplot2::aes(x = n_total, y = dev, label = model), size = 2.6,
+                             max.overlaps = Inf, seed = 1, min.segment.length = 0) +
+    ggplot2::scale_linetype_manual(values = ltys, name = paste0("Control limit (", method, ")")) +
+    ggplot2::scale_fill_manual(values = cols, drop = FALSE, name = "Model") +
+    ggplot2::scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +
+    (if (x_log) ggplot2::scale_x_log10(labels = scales::comma) else ggplot2::scale_x_continuous(labels = scales::comma)) +
+    ggplot2::coord_cartesian(xlim = xr) +
+    ggplot2::facet_grid(ggplot2::vars(ref), ggplot2::vars(registry), scales = "free",
+                        labeller = ggplot2::labeller(ref = ggplot2::as_labeller(stats::setNames(
+                          stringr::str_wrap(LOO_REFS, 20), names(LOO_REFS))))) +
+    ggplot2::labs(x = "Procedure volume (n)", y = "Model rate minus reference", ...) +
     theme_funnel()
 }

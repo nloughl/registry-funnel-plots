@@ -12,7 +12,9 @@ params:
   joints: ["ANKLE", "ELBOW"]
   time_yr: 3                     # follow-up year analysed in detail
   time_yrs: [1, 3, 5]            # follow-up years in the summary table
-  level: 0.998                   # flagging level (two-sided)
+  level: 0.90                    # flagging level (two-sided); 90% = one-sided 95% upper limit (supervisor guidance 2026-10)
+  screen_levels: [0.90, 0.95, 0.998]   # control limits compared in the "Lower control limits" section
+  screen_refs: ["pub", "min_loo_re"]   # references drawn in that section (published mean, lowest metafor leave-one-out mean)
   limit_method: "exact"          # funnel limits for the reference comparisons: "exact" (recommended) or "normal"
   ma_test: "knha"                # CI of the random-effects mean: "knha" (Knapp-Hartung) or "z"
   k_min: 3                       # minimum number of models for a meta-analysis
@@ -47,6 +49,15 @@ This report tests how much each model drives its registry mean, using two leave-
 It also compares control limits for **small-volume models**, where the normal approximation used so far is poorly calibrated. Many rare-joint models have fewer than 300 procedures.
 
 The analysis is exploratory and **the app is not changed**. The decisions and their justifications are collected at the end ([Decisions](#decisions)).
+
+## Supervisor guidance (2026-10) and how this report follows it {#guidance}
+
+| Issue with low-volume implants (e.g. total elbow) | Guidance | Where it is addressed |
+|---|---|---|
+| **Few implants (n) per brand/type** | Use a **90%** confidence interval / control limit. It has been used in the literature, and a two-sided 90% limit is a one-sided 95% test, in line with non-inferiority testing. | Default flagging level is now `level` = `r level_label(P$level)`. The new section [Lower control limits for screening](#screening) compares 90%, 95% and 99.8% funnels, with power and false-alarm tables. |
+| **Few brands/types (k)** | The mean can be biased upwards by the potential outlier(s), which can hide them. Use a less biased mean: a **leave-one-out analysis** as in meta-analysis (`metafor`), taking the **lowest** leave-one-out mean as the least biased. | The **lowest metafor leave-one-out mean** is now its own reference (`min_loo_re`) and is drawn in the screening funnels. The subtraction version is kept for comparison. See [references](#references). |
+
+**Why a 90% limit is a one-sided 95% test.** A two-sided 90% limit leaves 5% of the reference distribution above the upper limit and 5% below the lower limit. Screening for *poor* performance only uses the upper limit, so a model above it is flagged by a one-sided test at α = 0.05. This is the same convention as a non-inferiority (or equivalence) comparison judged with a 90% CI. The usual 95% funnel corresponds to one-sided α = 0.025, and 99.8% to α = 0.001.
 
 # Data and model inputs {#data}
 
@@ -192,7 +203,7 @@ for (j in names(runs)) {
 
 # Does the choice of reference change which models are flagged? {#references}
 
-Each model is compared with five references. All use the same **`r P$limit_method`** control limits at the **`r level_label(LV)`** level, built around that reference and evaluated at the model's own n:
+Each model is compared with six references. All use the same **`r P$limit_method`** control limits at the **`r level_label(LV)`** level, built around that reference and evaluated at the model's own n:
 
 | Reference | Definition | Role |
 |---|---|---|
@@ -200,13 +211,28 @@ Each model is compared with five references. All use the same **`r P$limit_metho
 | Own leave-one-out (subtraction) | The published total minus this model | Removes self-masking; same patient-weighted estimand |
 | Random-effects mean | The meta-analytic mean of all models | Limits any one model's pull; model-weighted |
 | Own leave-one-out (random effects) | The random-effects mean refitted without this model | Removes self-masking *and* limits the pull of the others |
-| Lowest leave-one-out mean | The lowest subtraction leave-one-out mean in the registry | **Sensitivity bound only** (see below) |
+| Lowest leave-one-out mean (subtraction) | The lowest subtraction leave-one-out mean in the registry | Least upward-biased patient-weighted mean |
+| Lowest leave-one-out mean (random effects) | The lowest `metafor::leave1out()` mean in the registry | **Least upward-biased mean (supervisor guidance)**; used in the screening funnels |
 
-**Why the lowest leave-one-out mean is only a bound.** Leaving out the model whose removal lowers the mean most removes the strongest high-rate pull on the reference, which addresses masking of the other models. But choosing the minimum is a data-driven choice and biases the reference low, so more models are flagged high. It is reported like the case-mix extremes: a model that is high only against this reference is a weak signal, while a model that is high under every reference is robust.
+**The lowest leave-one-out mean.** With few models, a potential outlier pulls the mean up and hides itself and others. The leave-one-out mean is recomputed $k$ times, once without each model. The **lowest** of these is the mean without the model that inflates it most, which makes it the least upward-biased reference available. Following the supervisor guidance, the metafor (random-effects) version is the primary choice. Its weights are also less dominated by the largest model.
 
-In the figure, each point is the model's rate minus *its own* reference. The bracket at each point is that model's own control limit, so a point outside its bracket is flagged. The panels with one shared reference also show the full funnel (grey).
+Two points to keep in mind when interpreting it:
 
-```{r status, results = "asis", fig.width = 11, fig.height = 13}
+* If the registry has **no** true outlier, the lowest leave-one-out mean is still slightly below the true mean, because it is the minimum of $k$ values. It then flags a few more models high than the published mean would. For screening, that is the intended trade-off: missing a poor implant costs more than reviewing one that turns out fine.
+* It is one reference for the whole registry, so the model whose removal gives the minimum is judged against a mean that excludes it. Every other model is judged against a mean that also excludes that model.
+
+A model that is high against every reference, including the published mean, is the strongest signal. A model that is high only against the lowest leave-one-out mean is a screening signal worth reviewing, not a finding.
+
+**How to read the figure.** Each row of panels is one reference; each column is one registry.
+
+* **Point:** the model's rate minus its reference. Zero means the model is exactly at its reference.
+* **Bracket (vertical bar at the point):** that model's own upper and lower control limit at its own n. A point outside its bracket is flagged. The brackets are the actual test.
+* **Grey funnel:** drawn only where **every model in the registry shares the same reference** (published mean, random-effects mean, both lowest leave-one-out means). A funnel is one curve built around one value, so it can only be drawn when there is one value.
+* **No funnel in the "own leave-one-out" rows:** there, each model is compared with the mean of all the *other* models, so every model has a *different* reference (Coonrad-Morrey's mean excludes Coonrad-Morrey, Latitude's excludes Latitude, and so on). There would be one funnel per model, and drawing them all would be unreadable. The bracket is simply that model's own funnel, cut out at its own n.
+
+In the shared-reference rows, the brackets sit exactly on the funnel, which is a check that the two agree.
+
+```{r status, results = "asis", fig.width = 11, fig.height = 15}
 status_all <- purrr::map_dfr(runs, ~ loo_status(.x, LV, P$limit_method))
 for (j in names(runs)) {
   cat("\n\n## ", JOINT_NAME[[j]], "\n\n", sep = "")
@@ -215,7 +241,7 @@ for (j in names(runs)) {
          title = paste0(JOINT_NAME[[j]], ", ", T_YR, " years: model status under each reference (", level_label(LV), ", ", P$limit_method, " limits)"),
          subtitle = "Point: model rate minus its own reference. Bracket: that model's own control limits. Grey funnel: shared reference",
          caption = "Labelled: models outside their limits.")
-  print(p); save_fig(p, paste0(tolower(j), "_", T_YR, "yr_status_by_reference"), 11, 13)
+  print(p); save_fig(p, paste0(tolower(j), "_", T_YR, "yr_status_by_reference"), 11, 15)
 }
 ```
 
@@ -232,7 +258,7 @@ status_all |>
   arrange(joint, registry, desc(n_total)) |>
   transmute(joint = joint_name, registry, model, n = scales::comma(n_total),
             `published` = pub, `own LOO (subtr.)` = loo_sub, `RE mean` = re, `own LOO (RE)` = loo_re,
-            `lowest LOO` = min_loo, `meta-analytic test (z)`) |>
+            `lowest LOO (subtr.)` = min_loo, `lowest LOO (RE)` = min_loo_re, `meta-analytic test (z)`) |>
   knitr::kable(caption = paste0("Status at the ", level_label(LV), " level (difference from each reference). ",
                                 "ok = within limits. The meta-analytic test is described in the next section."))
 ```
@@ -312,6 +338,79 @@ for (j in names(runs)) {
 
 A model flagged by the funnel but not by the meta-analytic test is unusual compared with the average, but within the spread that other models also show. A model flagged by both is a strong signal.
 
+# Lower control limits for screening (90% and 95%) {#screening}
+
+## Why lower limits for low-volume implants
+
+Funnel limits trade **false alarms** (flagging a model that performs like the reference) against **missed outliers** (not flagging a model that is worse). With large volumes, even a 99.8% limit catches a moderately worse implant. With the volumes typical of total elbows (often 100–500 per model), a 99.8% limit only catches implants that are dramatically worse, because the limit is far from the mean at small n.
+
+For a screening tool, whose job is to say which implants to look at more closely, the balance should favour sensitivity. A 90% limit (one-sided α = 0.05, the non-inferiority convention) or a 95% limit (one-sided α = 0.025) does that. The supervisor guidance supports 90% for low-volume data. The same convention, a 90% CI read as a one-sided test, is used for non-inferiority in den Broeder et al. (2023), and 90% CIs are also used in orthopaedic cohort research (Groot et al. 2017) (see [References](#refs)).
+
+## Power and false alarms
+
+The table shows, for a reference rate of 5% (close to the 3-year rate for these joints) and `r P$limit_method` limits, the probability that a model is flagged high:
+
+* **Power:** the probability of flagging a model whose true rate is 1.5×, 2× or 3× the reference.
+* **False alarm:** the probability of flagging a model whose true rate *equals* the reference.
+
+```{r power}
+pw <- limit_power(0.05, c(1.5, 2, 3), c(50, 100, 250, 500, 1000), unlist(P$screen_levels), P$limit_method)
+pw |>
+  mutate(level = level_label(level), ratio = paste0(ratio, "x")) |>
+  select(n, level, ratio, power, false_alarm) |>
+  tidyr::pivot_wider(names_from = ratio, values_from = power, names_prefix = "power, true rate ") |>
+  mutate(across(where(is.numeric) & !n, ~ sprintf("%.2f", .x))) |>
+  rename(`false alarm (true rate = reference)` = false_alarm) |>
+  knitr::kable(caption = "Probability of a high flag, reference rate 5% (binomial)")
+```
+
+Read across a row: at n = 250, a model with double the revision rate is caught most of the time at 90% and 95%, but noticeably less often at 99.8%. At n = 50–100, only the lower limits have useful power. The cost is the false-alarm column. At 90%, 5–10% of models that perform exactly like the reference are flagged high. That is the nominal 5% or a little above at small n, because revision counts are whole numbers and the limit falls between two counts. At 95% it is 3–4%, and at 99.8% almost 0. In a registry with $k$ models, about $0.05k$–$0.1k$ false high flags are expected at 90% (0.2–1.3 for $k$ = 4–13), and about $0.03k$ at 95% (0.1–0.5).
+
+## Funnels at 90%, 95% and 99.8%
+
+Each panel shows the 90%, 95% and 99.8% `r P$limit_method` limits around one reference: the published mean (top) and the lowest metafor leave-one-out mean (bottom). Points are coloured by the highest level whose limit they are outside.
+
+```{r screen_funnels, results = "asis", fig.width = 11, fig.height = 8}
+SL <- unlist(P$screen_levels)
+screen_all <- purrr::map_dfr(runs, ~ screen_status(.x, SL, unlist(P$screen_refs), P$limit_method))
+for (j in names(runs)) {
+  cat("\n\n### ", JOINT_NAME[[j]], "\n\n", sep = "")
+  ss <- filter(screen_all, joint == j)
+  p <- plot_screen_funnels(ss, runs[[j]], SL, P$limit_method, P$x_log,
+         title = paste0(JOINT_NAME[[j]], ", ", T_YR, " years: funnels at ", paste(level_label(sort(SL)), collapse = ", "), " limits"),
+         subtitle = "Top: published mean. Bottom: lowest metafor leave-one-out mean (least upward-biased)",
+         caption = paste0(P$limit_method, " binomial limits. Labelled: models outside at least the ", level_label(min(SL)), " limit."))
+  print(p); save_fig(p, paste0(tolower(j), "_", T_YR, "yr_screen_funnels"), 11, 8)
+}
+```
+
+```{r screen_counts}
+screen_all |>
+  tidyr::crossing(level = SL) |>
+  group_by(joint, registry, ref, level) |>
+  summarise(models = n(), high = sum(!is.na(above) & above >= level), low = sum(!is.na(below) & below >= level),
+            flagged_high = paste(sort(model[!is.na(above) & above >= level]), collapse = ", "), .groups = "drop") |>
+  mutate(joint = JOINT_NAME[joint], reference = LOO_REFS[as.character(ref)], level = level_label(level)) |>
+  arrange(joint, registry, reference, level) |>
+  select(joint, registry, reference, level, models, high, low, flagged_high) |>
+  knitr::kable(caption = "Models above / below the limit at each level, by reference")
+```
+
+```{r screen_table}
+screen_all |>
+  select(joint, registry, model, n_total, p, ref, p0, screen) |>
+  mutate(cell = sprintf("%s (ref %s)", screen, pct(p0, 0.01))) |>
+  select(-p0, -screen) |>
+  tidyr::pivot_wider(names_from = ref, values_from = cell) |>
+  arrange(joint, registry, desc(n_total)) |>
+  mutate(joint = JOINT_NAME[joint], n_total = scales::comma(n_total), p = pct(p)) |>
+  rename(n = n_total, rate = p) |>
+  rename_with(~ LOO_REFS[.x], any_of(names(LOO_REFS))) |>
+  knitr::kable(caption = "Each model's screening status: the highest level whose limit it is outside")
+```
+
+**How to use this for screening.** Models outside the 90% limit against the lowest leave-one-out mean form the review list. Of those, models that are also outside against the published mean, at 95%, or on the meta-analytic test are the stronger signals. A model flagged only at 90% against the lowest leave-one-out mean is the weakest signal: worth a look, and a reason to recheck at the next report year.
+
 # Decisions and justifications {#decisions}
 
 | # | Decision | Justification |
@@ -322,9 +421,10 @@ A model flagged by the funnel but not by the meta-analytic test is unusual compa
 | 4 | Two leave-one-out methods: **subtraction** and **random-effects (`metafor::leave1out`)** | Subtraction keeps the published, patient-weighted estimand and the unlisted models. The random-effects version also limits the pull of the other large models, through more equal weights. |
 | 5 | REML $\tau^2$ with **Knapp-Hartung** CIs; a common-effect fit only for comparison | REML is the recommended $\tau^2$ estimator. Knapp-Hartung gives better coverage of the pooled mean with few models (IntHout et al. 2014). The common-effect fit shows how much the n-dominant model would drive an inverse-variance mean. |
 | 6 | Influence diagnostics and the "influential" flag from `metafor::influence()` defaults | A standard, citable rule (Viechtbauer & Cheung 2010) rather than our own cut-offs. |
-| 7 | The **lowest leave-one-out mean** is reported only as a **sensitivity bound** | Choosing the minimum is data-driven and biases the reference low. Used as a bound, it identifies models that are high only under the most favourable reasonable mean. |
+| 7 | The **lowest leave-one-out mean** (metafor, random effects) is a reference in its own right and is used in the screening funnels; the subtraction version is kept for comparison | Supervisor guidance: with few models, the mean is biased upwards by potential outliers, and the lowest leave-one-out mean is the least biased. It is slightly low when there is no outlier, which suits screening (sensitivity over specificity). Models high against every reference remain the strongest signals. |
 | 8 | **Exact** binomial limits (Spiegelhalter 2005) for the reference comparisons | Normal limits flag models with the reference rate several times too often below n ≈ 250 (calibration table), and their lower limit is often below 0. Exact limits match the normal ones at large n, so nothing is lost for large models. |
 | 9 | The meta-analytic leave-one-out residual (`rstudent`) shown as a third flagging method | It uses each model's own CI, cannot mask itself, and allows for real between-model variation. It is the most defensible single test for few, small models. |
+| 11 | Default flagging level **90%** (`level`), with 95% and 99.8% compared in the screening section | Supervisor guidance for low-volume implants. A two-sided 90% limit is a one-sided 95% test, the non-inferiority convention (den Broeder et al. 2023; 90% CIs also in Groot et al. 2017). Power at n = 50–500 is much higher than at 99.8%, at the cost of about 1 false high flag per 10–20 models that perform like the reference. |
 | 10 | Only the report is changed; the app is unchanged | Exploratory. The choice of default reference and limits for the app should wait until these results have been reviewed. |
 
 # Caveats {#caveats}
@@ -333,10 +433,18 @@ A model flagged by the funnel but not by the meta-analytic test is unusual compa
 * **Two estimands.** The published and subtraction means are patient-weighted (a typical patient). The random-effects means are model-weighted (a typical model). Both are reasonable benchmarks, but they answer different questions. A model can be "average for its patients" and still sit high among the models.
 * **KM rates are not additive.** The subtraction method treats the published rate as an n-weighted average of the models' rates, which is approximately but not exactly true.
 * **Binomial funnels ignore censoring.** The exact limits fix the small-n approximation, but they still treat the KM percentage as a proportion of n. The meta-analytic test uses the published CIs and avoids this. This is one reason to give it weight.
-* **Multiple comparisons.** Each registry is tested several times (5 references × several models). The 99.8% level partly allows for this. Results are hypothesis-generating.
+* **Multiple comparisons.** Each registry is tested several times (6 references × several models). At 90%, about 1 in 10–20 models with the reference rate is flagged high by chance. This is acceptable for screening, but the flags are hypotheses to review, not findings.
 * **Different populations.** AOANJRR ankle models (A15) and the A11 mean cover all diagnoses. NJR elbow models are total elbows (trauma + elective). These match the scope decisions in the main README.
 
-# References
+# References {#refs}
+
+**Use of 90% confidence intervals** (supervisor guidance; justification for the 90% screening limit):
+
+* den Broeder N, den Broeder AA, Verhoef LM, van den Hoogen FHJ, van der Maas A, van den Bemt BJF. Non-medical switching from tocilizumab to sarilumab in rheumatoid arthritis patients with low disease activity, an observational study. *Clin Pharmacol Ther* 2023;114(4):810–814. doi:10.1002/cpt.2999. Its co-primary outcomes are judged by the **90% CI** against a non-inferiority margin, i.e. a one-sided test at α = 0.05, the same logic as a 90% upper funnel limit.
+* Groot JAM, Jonkers FJ, Kievit AJ, Kuijer PPFM, Hoozemans MJM. Beneficial and limiting factors for return to work following anterior cruciate ligament reconstruction: a retrospective cohort study. *Arch Orthop Trauma Surg* 2017;137(2):155–166. doi:10.1007/s00402-016-2594-6. An orthopaedic cohort study that reports **90% confidence intervals**.
+
+**Methods**
+
 
 * Spiegelhalter DJ. Funnel plots for comparing institutional performance. *Stat Med* 2005;24:1185–1202.
 * Viechtbauer W, Cheung MW-L. Outlier and influence diagnostics for meta-analysis. *Res Synth Methods* 2010;1:112–125.
