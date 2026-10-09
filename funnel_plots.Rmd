@@ -491,6 +491,7 @@ points |>
 
 The strata are age-sex classes (e.g. "<55 Female"; one class per age group and sex), using AOANJRR Table KP22 and NJR Table 3.K6 (NJR split by unicondylar cemented vs uncemented/hybrid).
 Each class gets limits centred on its own `r T_YR`-year rate, and the rate is then set to 0. This shows how much the funnel width, and therefore the chance of flagging a device, depends on the patients a device is used in.
+It shows the change in **width only**. Case mix also moves the expected rate, which is the larger effect. The separate report `casemix_adjustment.Rmd` shows that shift, either as funnels moved to each age-sex class's rate (option A) or as a case-mix range for each model (option B).
 
 ```{r casemix_data}
 if (!is.null(ext$casemix)) {

@@ -155,6 +155,27 @@ for (fam in fams) {
 }
 ```
 
+## Upper limits only {#option-a-upper}
+
+The same figure for one-sided screening of poor performers: only the three upper limits are drawn (registry mean, lowest-risk class, highest-risk class), with no shading. Points not above any upper limit are grey; "low" statuses are not shown because no lower limits are drawn.
+
+```{r option_a_upper, results = "asis", fig.width = 12, fig.height = 6.5}
+for (lv in LEVELS) {
+  cat("\n\n### All models, upper limits,", level_label(lv), "\n\n")
+  p <- plot_cm_adjusted_upper(cl, curves_shift, lv, P$label_points, P$x_log,
+         title = paste0(P$procedure, " ", T_YR, "-year revision: case-mix adjusted upper limits (", level_label(lv), ")"),
+         subtitle = "Upper limits shifted to each reference's rate; points = model rate - registry mean",
+         caption = paste("Point colour: status at the", level_label(LV), "limits.", src_note))
+  print(p); save_fig(p, paste0("adjusted_upper_", lv * 1000), 12, 6.5)
+}
+for (fam in fams) {
+  cat("\n\n### ", fam, ", upper limits, ", level_label(LV), "\n\n", sep = "")
+  p <- plot_cm_adjusted_upper(filter(cl, family == fam), curves_shift, LV, "all", P$x_log,
+         title = paste0(fam, ": case-mix adjusted upper limits (", level_label(LV), ")"), caption = src_note)
+  print(p); save_fig(p, paste0("adjusted_upper_", gsub("[^a-z0-9]+", "_", tolower(fam)), "_", LV * 1000), 12, 6.5)
+}
+```
+
 # Option B: model point ranges {#option-b}
 
 **What it shows.** Here the funnels stay centred on 0, as in the main report. What moves is the point. Each model gets one deviation per reference:
@@ -165,10 +186,11 @@ for (fam in fams) {
 
 Each deviation is read against the funnel *width* of its own reference: the black funnel for $d_{mean}$, blue for $d_{low}$ and red for $d_{high}$. The funnels differ only slightly in width, because the location shift is now carried by the points.
 
-Two ways to draw it:
+Three ways to draw it (B3 is in its own section below):
 
 * **B1, separate markers.** Three markers per model, joined by a grey line: a circle (vs mean), a blue up-triangle (vs lowest risk) and a red down-triangle (vs highest risk). Each marker is compared with the funnel of its own colour. This is the most literal display, because every number is on the plot. With many models it gets busy.
 * **B2, point with a case-mix band.** The main point (vs mean), coloured by status, with a shaded band from $d_{high}$ to $d_{low}$. The blue and red ticks at the band's ends are compared with the blue and red funnels. It reads like a confidence interval, but it is **not** sampling uncertainty. It is the range of deviations that the age-sex mix alone could produce.
+* **B3, model and risk-class points.** Like B2, but with a blue point (vs lowest risk) above and a red point (vs highest risk) below the black main point, and no status colours. Each point is compared with the funnel line of its own colour. Shown at 95% limits.
 
 **Justification.**
 
@@ -198,6 +220,35 @@ for (fam in fams) {
   }
 }
 ```
+
+## B3 model and risk-class points, 95% limits {#option-b3}
+
+This is the B2 display with the band replaced by two coloured points, so each comparison is read directly:
+
+* **Black point:** model rate − registry mean. Compare it with the **black** funnel.
+* **Blue point (above):** model rate − lowest-risk class rate, i.e. the deviation if all the model's patients were low risk. Compare it with the **blue** dashed funnel.
+* **Red point (below):** model rate − highest-risk class rate, i.e. the deviation if all its patients were high risk. Compare it with the **red** dashed funnel.
+
+A point outside the funnel of its own colour is outside the limits for that reference. Status colours are left out on purpose, so the colour only means "which reference". This figure uses **95%** limits (closer to a screening threshold than 99.8%), so more points sit outside.
+
+```{r option_b3, results = "asis", fig.width = 12, fig.height = 6.5}
+B3_LV <- 0.95
+b3_curves <- if (B3_LV %in% LEVELS) curves_width else cm_ref_curves(cm_ext, B3_LV, P$limit_method, n_max, shifted = FALSE)
+b3_sub <- "Black: vs registry mean. Blue (above): vs lowest-risk class. Red (below): vs highest-risk class. Compare each dot with the line of its colour"
+p <- plot_cm_ranges(cl, b3_curves, B3_LV, "dots", P$label_points, P$x_log,
+       title = paste0(P$procedure, " ", T_YR, "-year revision: model deviation by reference (", level_label(B3_LV), ")"),
+       subtitle = b3_sub, caption = paste("Funnels centred on 0 (width of each reference).", src_note))
+print(p); save_fig(p, paste0("point_ranges_dots_", B3_LV * 1000), 12, 6.5)
+for (fam in fams) {
+  cat("\n\n### ", fam, "\n\n", sep = "")
+  p <- plot_cm_ranges(filter(cl, family == fam), b3_curves, B3_LV, "dots", "all", P$x_log,
+         title = paste0(fam, ": model deviation by reference (", level_label(B3_LV), ")"),
+         subtitle = b3_sub, caption = src_note)
+  print(p); save_fig(p, paste0("point_ranges_dots_", gsub("[^a-z0-9]+", "_", tolower(fam)), "_", B3_LV * 1000), 12, 6.5)
+}
+```
+
+Labels in the all-models figure follow `label_points` (`flagged` uses the status at the `r level_label(LV)` level). The family figure labels every model.
 
 # A and B give the same answer {#equivalence}
 

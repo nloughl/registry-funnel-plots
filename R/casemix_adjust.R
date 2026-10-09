@@ -189,10 +189,53 @@ plot_cm_adjusted <- function(cl, curves, envelope, level, label_points = "flagge
   p
 }
 
+#' Option A, upper limits only: the three shifted UPPER limits (mean / lowest-risk / highest-risk),
+#' no shaded envelope and no lower limits. One-sided screening for poor performers, so the "low"
+#' statuses are not shown: any model not above an upper limit is drawn grey ("Not above any upper limit").
+#' The y range is built from the drawn layers only (upper limits + points), not from the lower limits.
+CM_STATUS_UPPER <- c(CM_STATUS[c("robust_high", "sens_high", "cond_high")], not_high = "Not above any upper limit")
+CM_STATUS_UPPER_COLOURS <- c(CM_STATUS_COLOURS[CM_STATUS[c("robust_high", "sens_high", "cond_high")]],
+                             "Not above any upper limit" = "#BDBDBD")
+
+plot_cm_adjusted_upper <- function(cl, curves, level, label_points = "flagged", x_log = TRUE,
+                                   facet = TRUE, pad = 0.1, ...) {
+  high_keys <- c("robust_high", "sens_high", "cond_high")
+  cl <- dplyr::mutate(cl,
+    up_key    = ifelse(cm_key %in% high_keys, cm_key, "not_high"),
+    up_status = factor(CM_STATUS_UPPER[up_key], levels = CM_STATUS_UPPER))
+  cv <- dplyr::filter(curves, .data$level == !!level, registry %in% cl$registry)
+  xr <- cm_x_range(cl)
+  # y range: points (vs mean), 0, and the upper limits across the visible x range
+  vis <- dplyr::filter(cv, n >= xr[1], n <= xr[2])
+  yr <- range(c(0, cl$d_mean, vis$dev_upper), na.rm = TRUE)
+  yr <- yr + c(-1, 1) * diff(yr) * pad
+  lab <- switch(label_points, all = cl, none = cl[0, ], cl[cl$up_key %in% high_keys, ])
+  p <- ggplot2::ggplot() +
+    ggplot2::geom_hline(yintercept = 0, linewidth = 0.3, colour = "grey40") +
+    ggplot2::geom_line(data = cv, ggplot2::aes(x = n, y = dev_upper, colour = ref, linetype = ref,
+                                               group = interaction(registry, ref)), linewidth = 0.7) +
+    ggplot2::geom_point(data = cl, ggplot2::aes(x = n_total, y = d_mean, fill = up_status),
+                        shape = 21, size = 2.8, colour = "grey15", stroke = 0.4) +
+    ggrepel::geom_text_repel(data = lab, ggplot2::aes(x = n_total, y = d_mean, label = label), size = 2.7,
+                             max.overlaps = Inf, seed = 1, min.segment.length = 0) +
+    ggplot2::scale_fill_manual(values = CM_STATUS_UPPER_COLOURS, drop = FALSE, name = "Model status") +
+    cm_scales(x_log) +
+    ggplot2::coord_cartesian(xlim = xr, ylim = yr) +
+    ggplot2::labs(x = "Procedure volume (n)", y = "Model rate minus registry mean", ...) +
+    theme_funnel() +
+    ggplot2::guides(fill = ggplot2::guide_legend(override.aes = list(size = 3.5), order = 2),
+                    colour = ggplot2::guide_legend(order = 1), linetype = ggplot2::guide_legend(order = 1))
+  if (facet) p <- p + ggplot2::facet_wrap(ggplot2::vars(registry), scales = "free")
+  p
+}
+
 #' Option B: funnels centred on 0 (width of each reference only); each model drawn as a range of
 #' deviations. style = "markers": three markers (vs mean / lowest-risk / highest-risk) joined by a line;
 #'        style = "band":    the main point (vs mean) with a shaded band spanning the other two.
-plot_cm_ranges <- function(cl, curves, level, style = c("markers", "band"), label_points = "flagged",
+#'        style = "dots":    the main point (black) with a blue dot above (vs lowest-risk class) and a red dot
+#'                           below (vs highest-risk class), joined by a thin line; no status colours, the reader
+#'                           compares each dot with the funnel line of the same colour.
+plot_cm_ranges <- function(cl, curves, level, style = c("markers", "band", "dots"), label_points = "flagged",
                            x_log = TRUE, facet = TRUE, ...) {
   style <- match.arg(style)
   cv <- dplyr::filter(curves, .data$level == !!level, registry %in% cl$registry)
@@ -204,7 +247,19 @@ plot_cm_ranges <- function(cl, curves, level, style = c("markers", "band"), labe
     ggplot2::geom_line(data = cv, ggplot2::aes(x = n, y = dev_lower, colour = ref, linetype = ref,
                                                group = interaction(registry, ref)), linewidth = 0.6) +
     ggplot2::geom_hline(yintercept = 0, linewidth = 0.3, colour = "grey40")
-  if (style == "markers") {
+  if (style == "dots") {
+    dt <- cl |>
+      dplyr::select(registry, label, n_total, d_mean, d_low, d_high) |>
+      tidyr::pivot_longer(c(d_mean, d_low, d_high), names_to = "ref", values_to = "d") |>
+      dplyr::mutate(ref = factor(sub("^d_", "", ref), levels = names(CM_REFS)))
+    p <- p +
+      ggplot2::geom_linerange(data = cl, ggplot2::aes(x = n_total, ymin = d_high, ymax = d_low),
+                              colour = "grey60", linewidth = 0.35) +
+      ggplot2::geom_point(data = dt, ggplot2::aes(x = n_total, y = d, colour = ref, shape = ref),
+                          size = 2.6) +
+      ggplot2::scale_shape_manual(values = c(mean = 16, low = 16, high = 16), labels = CM_REFS,
+                                  name = "Funnel reference")
+  } else if (style == "markers") {
     mk <- cl |>
       dplyr::select(registry, label, n_total, cm_status, d_mean, d_low, d_high) |>
       tidyr::pivot_longer(c(d_mean, d_low, d_high), names_to = "ref", values_to = "d") |>
