@@ -83,6 +83,16 @@ A separate report. The case-mix envelope in `funnel_plots.Rmd` only shows how fu
 rmarkdown::render("casemix_adjustment.Rmd")
 ```
 
+## Random-effects leave-one-out report (`loo_metafor.Rmd`)
+A focused version of `loo_influence.Rmd` containing only the metafor (random-effects) methods, for sharing.
+- Contents: model inputs, the random-effects meta-analysis (`rma`, `predict`, `weights`), metafor's own `forest()` and `plot(influence())` figures, `leave1out()` means, influence diagnostics, standardised residuals, Wald vs exact limits, and 90% / 95% funnels around the published mean and the lowest leave-one-out mean.
+- A table near the top lists which figures and tables come from metafor, and each figure has a "Source" line.
+- **Summary** (at `summary_level` = 90%, `summary_method` = `normal`, i.e. Wald): the models driving the mean (metafor influential flag, and which way each pulls the mean), the recommended least-biased mean (the lowest random-effects leave-one-out mean, with CI and the model left out), and the outliers vs the published mean and vs that mean (counts, names, newly flagged / no longer flagged).
+
+```r
+rmarkdown::render("loo_metafor.Rmd")
+```
+
 ## Leave-one-out and influence analysis (`loo_influence.Rmd`)
 A separate, exploratory report for the rare joints (total ankle, total elbow; AOANJRR and NJR, the registries with model-level rates). With 4–13 models per registry and the largest holding 30–50% of procedures, one model can drive the registry mean. It can hide itself (self-masking) or hide other models (masking of others). The app is unchanged.
 
@@ -92,12 +102,17 @@ A separate, exploratory report for the rare joints (total ankle, total elbow; AO
   - `leave1out()` gives the means without each model.
   - `influence()` gives the externally standardised residual (rstudent), DFFITS, Cook's distance, covariance ratio, hat value, τ² deleted, and metafor's "influential" flag (Viechtbauer & Cheung 2010).
   - The random-effects mean is model-weighted (a typical model), not patient-weighted.
-- **Reference options compared per model:** published mean / own subtraction leave-one-out / random-effects mean / own random-effects leave-one-out / lowest leave-one-out mean. The last is a **sensitivity bound only**, because choosing the minimum is data-driven and biased low.
+- **Reference options compared per model:** published mean / own subtraction leave-one-out / random-effects mean / own random-effects leave-one-out / lowest leave-one-out mean (subtraction) / lowest leave-one-out mean (metafor). The lowest metafor leave-one-out mean is the least upward-biased mean, following the supervisor guidance. It is slightly low when there is no outlier, which suits screening.
 - **Limits for small-volume models:**
   - Exact binomial limits (Spiegelhalter 2005) are the default in this report. A calibration table shows that normal limits flag models with the reference rate 2–7× too often below n ≈ 250.
   - The rstudent residual is shown as a third, meta-analytic test. It uses each model's own CI, cannot mask itself and allows for between-model variation (τ²).
+- **Supervisor guidance (2026-10):**
+  - The default flagging level is **90%** (`level`). A two-sided 90% limit is a one-sided 95% test, in line with non-inferiority testing.
+  - The **lowest metafor leave-one-out mean** (`min_loo_re`) is a reference in its own right, as the least upward-biased mean when there are few models.
+  - A **"Lower control limits for screening"** section compares 90%, 95% and 99.8% funnels around the published mean and the lowest leave-one-out mean, with power and false-alarm tables.
+  - The supervisor's references are listed by DOI (full citations to be added).
 - Every metric is explained in the report, which also has a decisions table and caveats (few models, two estimands, KM non-additivity, multiple comparisons).
-- Code: `R/loo.R`. Figures: `figures/loo_*.png`. Parameters: `joints`, `time_yr`, `time_yrs`, `level`, `limit_method`, `ma_test`, `k_min`.
+- Code: `R/loo.R`. Figures: `figures/loo_*.png`. Parameters: `joints`, `time_yr`, `time_yrs`, `level` (0.90), `screen_levels` (0.90, 0.95, 0.998), `screen_refs`, `limit_method`, `ma_test`, `k_min`.
 
 ```r
 rmarkdown::render("loo_influence.Rmd")     # needs the metafor package
@@ -213,6 +228,7 @@ To read the data from a different folder, set `REGISTRY_DATA_DIR` before startin
 | `R/casemix_adjust.R` | Case-mix adjustment report: class rates, shifted / centred reference funnels, `classify_casemix()`, option A and B plots |
 | `casemix_adjustment.Rmd` | Case-mix adjustment report (adjusted funnels and model point ranges) |
 | `R/loo.R` | Leave-one-out / influence report: model inputs (SE from KM CI), `loo_fit()` (metafor), `loo_status()`, calibration, plots |
+| `loo_metafor.Rmd` | Random-effects (metafor) leave-one-out report with summary of drivers, least-biased mean and outliers |
 | `loo_influence.Rmd` | Leave-one-out and influence analysis of rare-joint registry means |
 | `R/levels.R` | Detail levels: `derive_attributes()`, `pool_to_level()`, `level_counts()` |
 | `config/device_families.csv` | Regex that groups each registry's device labels into families/brands (Oxford, ZUK, ...) |
