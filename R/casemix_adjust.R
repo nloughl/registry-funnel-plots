@@ -229,6 +229,79 @@ plot_cm_adjusted_upper <- function(cl, curves, level, label_points = "flagged", 
   p
 }
 
+#' Option B4, envelope overlay: all registries on ONE plot. Per registry (registry colour): the
+#' registry-mean funnel (line) and the case-mix envelope, i.e. the band spanned by the limits of all
+#' age-sex classes, each centred on 0 (width only, as in the Shiny app's case-mix envelope).
+#' Each model gets three deviations, as in the "dots" style: black = p - p_mean, blue = p - p_low
+#' (vs lowest-risk class), red = p - p_high (vs highest-risk class), joined by a line in the registry
+#' colour; the point shape and outline also identify the registry.
+#' Read black against the registry-mean line, blue against the INNER edge of the envelope (narrowest
+#' funnel = lowest-risk class) and red against the OUTER edge (widest funnel = highest-risk class).
+#' The envelope edges are the lowest-/highest-risk funnels because both come from the same classes
+#' (casemix_classes(min_n)) and the funnel width grows with the rate for rates < 50%.
+plot_cm_envelope_overlay <- function(cl, curves, envelope, means, level, label_points = "flagged",
+                                     x_log = TRUE, ...) {
+  regs <- intersect(names(REGISTRY_COLOURS), unique(cl$registry))
+  m  <- dplyr::filter(means, registry %in% regs)
+  cv <- dplyr::filter(curves, .data$level == !!level, registry %in% regs, ref == "mean")
+  ev <- dplyr::filter(envelope, .data$level == !!level, registry %in% regs)
+  xr <- cm_x_range(cl)
+  # y range: all three deviations + the envelope edges at the smallest visible volume
+  at <- dplyr::filter(ev, n >= xr[1]) |> dplyr::group_by(registry) |> dplyr::filter(n == min(n))
+  yr <- range(c(cl$d_mean, cl$d_low, cl$d_high, at$up_hi, at$lo_lo), na.rm = TRUE)
+  yr <- yr + c(-1, 1) * diff(yr) * 0.08
+  dt <- cl |>
+    dplyr::select(registry, label, n_total, d_mean, d_low, d_high) |>
+    tidyr::pivot_longer(c(d_mean, d_low, d_high), names_to = "ref", values_to = "d") |>
+    dplyr::mutate(ref = factor(sub("^d_", "", ref), levels = names(CM_REFS)),
+                  registry = factor(registry, levels = regs))
+  shapes <- stats::setNames(c(21, 24, 22, 23, 25)[seq_along(regs)], regs)
+  reg_labs <- registry_legend_labels(m)[regs]
+  p <- ggplot2::ggplot()
+  # envelopes with fixed fills (one layer per registry) so the fill scale is free for the points
+  for (reg in regs) {
+    e <- dplyr::filter(ev, registry == reg)
+    p <- p +
+      ggplot2::geom_ribbon(data = e, ggplot2::aes(x = n, ymin = up_lo, ymax = up_hi),
+                           fill = REGISTRY_COLOURS[[reg]], alpha = 0.22) +
+      ggplot2::geom_ribbon(data = e, ggplot2::aes(x = n, ymin = lo_lo, ymax = lo_hi),
+                           fill = REGISTRY_COLOURS[[reg]], alpha = 0.22)
+    # thin edge lines, so each envelope's extent stays visible where envelopes overlap
+    for (edge in c("up_lo", "up_hi", "lo_lo", "lo_hi"))
+      p <- p + ggplot2::geom_line(data = e, ggplot2::aes(x = n, y = .data[[edge]]),
+                                  colour = REGISTRY_COLOURS[[reg]], linewidth = 0.3, linetype = "22")
+  }
+  p <- p +
+    ggplot2::geom_hline(yintercept = 0, linewidth = 0.3, colour = "grey40") +
+    ggplot2::geom_line(data = cv, ggplot2::aes(x = n, y = dev_upper, colour = registry), linewidth = 0.8) +
+    ggplot2::geom_line(data = cv, ggplot2::aes(x = n, y = dev_lower, colour = registry), linewidth = 0.8) +
+    ggplot2::geom_linerange(data = cl, ggplot2::aes(x = n_total, ymin = d_high, ymax = d_low, colour = registry),
+                            linewidth = 0.4, alpha = 0.8, show.legend = FALSE) +
+    ggplot2::geom_point(data = dt, ggplot2::aes(x = n_total, y = d, fill = ref, shape = registry, colour = registry),
+                        size = 2.6, stroke = 0.6) +
+    ggrepel::geom_text_repel(data = cm_label_data(cl, label_points),
+                             ggplot2::aes(x = n_total, y = d_mean, label = label, colour = registry),
+                             size = 2.6, max.overlaps = Inf, seed = 1, min.segment.length = 0,
+                             nudge_x = 0.04, show.legend = FALSE) +
+    ggplot2::scale_colour_manual(values = REGISTRY_COLOURS[regs], breaks = regs, labels = reg_labs,
+                                 name = "Registry (mean revision, n)") +
+    ggplot2::scale_shape_manual(values = shapes, breaks = regs, labels = reg_labs,
+                                name = "Registry (mean revision, n)") +
+    ggplot2::scale_fill_manual(values = CM_REF_COLOURS,
+                               labels = c(mean = "vs registry mean", low = "vs lowest-risk class",
+                                          high = "vs highest-risk class"),
+                               name = "Model deviation") +
+    ggplot2::scale_y_continuous(labels = scales::percent_format(accuracy = 0.1), breaks = scales::pretty_breaks(8)) +
+    (if (x_log) ggplot2::scale_x_log10(labels = scales::comma) else ggplot2::scale_x_continuous(labels = scales::comma)) +
+    ggplot2::coord_cartesian(xlim = xr, ylim = yr) +
+    ggplot2::labs(x = "Procedure volume (n)", y = "Model rate minus reference rate", ...) +
+    theme_funnel() +
+    ggplot2::guides(colour = ggplot2::guide_legend(order = 1, override.aes = list(fill = "white", size = 3)),
+                    shape  = ggplot2::guide_legend(order = 1),
+                    fill   = ggplot2::guide_legend(order = 2, override.aes = list(shape = 21, colour = "grey20", size = 3.5)))
+  p
+}
+
 #' Option B: funnels centred on 0 (width of each reference only); each model drawn as a range of
 #' deviations. style = "markers": three markers (vs mean / lowest-risk / highest-risk) joined by a line;
 #'        style = "band":    the main point (vs mean) with a shaded band spanning the other two.

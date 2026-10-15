@@ -213,6 +213,34 @@ Under the plot, the high-outlier table and the cumulative-excess summary update 
 
 To read the data from a different folder, set `REGISTRY_DATA_DIR` before starting the app.
 
+### Your data
+**+ Add your data** (top right of the plot, both tabs) opens a panel beside the plot where you can put your own numbers next to the registry data. Nothing is saved; the values live in the browser session only.
+- **Reference rate (optional):** a mean revision rate (%) and, optionally, the number of procedures it is based on. A black funnel is drawn around it with the selected control limits and distribution. In the panel layout it gets its own panel.
+- **Model points (optional):** one model per line as `name, revision rate (%), n`. Rows can be typed, pasted from a spreadsheet (tab- or semicolon-separated; decimal commas are accepted then) or loaded from a CSV (a template can be downloaded). Lines that cannot be read are listed under the box.
+- **Judge your models against:** your own reference and/or any of the selected registries. Each model is compared with each ticked reference at its own n, using the same limits as the registry devices. Registry references follow the **Funnel reference** setting.
+
+Your models are drawn as diamonds (◆) filled in the colour of the reference they are judged against (black = your reference), with the usual red/green rings. In the panel layout each one sits in its reference's panel. A table under the plot gives one row per model and one column per reference (status and upper limit at that n); its CSV adds the lower limit, Δp and excess. Your models are never counted in the registry outlier tables or the cumulative excess.
+
+Small n gives wide funnels: with your points at a few hundred procedures and registry devices in the tens of thousands, the **Log x axis** option makes both readable.
+
+### Custom tab
+Funnel plots from your own numbers only, with no registry data. It starts with one empty data set; **+ Add data set** adds more (up to 8), and each set after the first has a **Remove this set** link. Each set has its own colour and funnel, and:
+- **Name** (shown in the legend, tables and the set's header).
+- **Model points:** one model per line as `name, revision rate (%), n`, typed, pasted from a spreadsheet or loaded from a CSV (template available), with the same parsing as the "Your data" panel.
+- **Funnel reference:** the n-weighted mean of the set's points (sum of p x n / sum of n), a rate you enter (with an optional n for the legend), or none (points only). A set with an entered rate and no points draws a funnel only, e.g. a registry or national average. With fewer than 5 models the pooled mean is driven by the largest ones, and a note says so.
+
+**Judge each set's points against:**
+- **Its own funnel** (default): each model is compared with its own set's reference. Points of a set without a reference are drawn as open diamonds on the rate scale and not judged.
+- **Every funnel:** each model is compared with every set's reference. The table becomes one row per model and one column per funnel (status and upper limit, "(own)" marks the model's own set).
+
+**Y scale:**
+- **Revision rate:** every funnel at its own reference rate, every model at its observed rate.
+- **Standardised, deviation from own reference:** every funnel is drawn relative to its own reference, so all of them are centred on 0 and only their widths differ. Each model is plotted once, as its rate minus its own set's reference. Models of a set without a reference cannot be standardised and are left off (a note says so).
+- **Standardised, ratio to own reference:** the same, as rate / reference, with every funnel centred on 1.
+- With **Every funnel**, the standardised plot can instead show each model once per funnel, relative to that funnel's reference ("Points on the standardised plot"). By default it shows each model once against its own reference, and the other comparisons stay in the table.
+
+Other settings: control limit (95%, 99.8% or both), funnel distribution, log x axis and labels. Points are diamonds in their set's colour, with red/green rings above/below the limits. The summary gives, per set and against its own funnel, the outlier counts, procedures with a high-outlier model and the cumulative excess, defined as in the registry tabs. The CSV download has one row per model and funnel, with the method and level used.
+
 ## Layout
 | File | Contents |
 |---|---|
@@ -223,6 +251,8 @@ To read the data from a different folder, set `REGISTRY_DATA_DIR` before startin
 | `R/plots.R` | `funnel_plot()` core function and the named variants |
 | `R/rare.R` | Rare joints: `load_rare()`, `rare_means()`, `rare_points()` |
 | `app/rare_tab.R` | Rare joints tab of the app |
+| `app/user_data.R` | "Your data" panel (user reference rate and model points) used by both tabs |
+| `app/custom_tab.R` | Custom tab: funnel plot from the user's own data only |
 | `config/rare_joint_means.csv` | Which rows give each registry's rare-joint mean |
 | `config/rare_device_families.csv` | Harmonised rare-joint model names |
 | `R/casemix_adjust.R` | Case-mix adjustment report: class rates, shifted / centred reference funnels, `classify_casemix()`, option A and B plots |
@@ -234,6 +264,11 @@ To read the data from a different folder, set `REGISTRY_DATA_DIR` before startin
 | `config/device_families.csv` | Regex that groups each registry's device labels into families/brands (Oxford, ZUK, ...) |
 | `config/device_attributes.csv` | Rules for fixation / bearing / material / tibia, each marked stated or design |
 | `config/registry_means_override.csv` | Optional hand-set registry means, e.g. from a table not yet extracted |
+
+### Several report years
+`load_extraction(data_dir, procedure, report_years = "latest")` keeps the newest report per registry. That guards
+against a regextract run with several editions (`--year 2024 2025`) mixing them. Use `report_years = "all"` or
+specific years to keep them.
 
 ### Registry means
 For each registry, the funnel centre at `time_yr` is taken from the first of these sources that is available:

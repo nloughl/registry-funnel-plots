@@ -41,7 +41,12 @@ rare_ui <- function() {
         downloadButton("rj_dl_points", "All points (CSV)", class = "btn-sm")
       ),
       uiOutput("rj_notes"),
-      card(full_screen = TRUE, card_header(textOutput("rj_title")), plotlyOutput("rj_funnel", height = "680px")),
+      card(full_screen = TRUE,
+           card_header(class = "d-flex justify-content-between align-items-center gap-2",
+                       textOutput("rj_title", inline = TRUE), user_data_toggle("rj_ud")),
+           layout_sidebar(fillable = FALSE, border = FALSE, sidebar = user_data_sidebar("rj_ud"),
+                          plotlyOutput("rj_funnel", height = "680px"))),
+      uiOutput("rj_ud_card"),
       layout_columns(
         col_widths = c(7, 5),
         card(card_header(textOutput("rj_outlier_title")), tableOutput("rj_outliers")),
@@ -105,10 +110,16 @@ rare_server <- function(input, output, session) {
       mutate(upper_limit = purrr::map_dbl(lim, "upper"), lower_limit = purrr::map_dbl(lim, "lower"),
              outlier = case_when(p > upper_limit ~ "high", p < lower_limit ~ "low", TRUE ~ "none"))
   })
+  rj_ud <- user_data_server("rj_ud", means = rj_means,
+                            phis = reactive(if (nrow(rj_all_points())) distinct(rj_all_points(), registry, phi) else NULL),
+                            level = rj_out_lvl, method = reactive(input$rj_method))
+  rj_n_max <- reactive(max(c(rj_points()$n_total, rj_ud()$points$n_total, 100), na.rm = TRUE) * 1.1)
+  rj_ud_curves <- reactive(user_curves(rj_ud(), rj_levels(), input$rj_method, rj_n_max()))
+
   rj_curves <- reactive({
     m <- rj_means()
     req(nrow(m) > 0)
-    n_max <- max(c(rj_points()$n_total, 100), na.rm = TRUE) * 1.1
+    n_max <- rj_n_max()
     ph <- if (nrow(rj_all_points())) distinct(rj_all_points(), registry, phi) else tibble::tibble(registry = character(), phi = numeric())
     m |>
       left_join(ph, by = "registry") |>
@@ -185,8 +196,14 @@ rare_server <- function(input, output, session) {
                                     marker = list(color = cols[[reg]], size = 9, line = list(color = "white", width = 1)),
                                     name = labs[[reg]], legendgroup = reg, showlegend = FALSE)
     }
+    u <- rj_ud(); uc <- rj_ud_curves()
+    if (!is.null(u$ref)) p <- add_user_funnel(p, uc, yc, rj_levels(), rj_out_lvl(), user_legend_label(u$ref),
+                                              function(lv) if (lv >= 0.998) "solid" else "dash")
+    p <- add_user_points(p, u$points, yc$point, rj_yr(), rj_out_lvl())
+    ring_pts <- bind_rows(if (nrow(pts)) select(pts, n_total, all_of(yc$point), outlier),
+                          if (!is.null(u$points)) select(u$points, n_total, all_of(yc$point), outlier))
     for (kind in c("high", "low")) {
-      r <- pts[pts$outlier %in% kind, ]
+      r <- ring_pts[ring_pts$outlier %in% kind, ]
       if (nrow(r)) p <- add_trace(p, x = r$n_total, y = r[[yc$point]], type = "scatter", mode = "markers",
                                   marker = list(symbol = "circle-open", size = 18, color = c(high = "#D62728", low = "#2CA02C")[[kind]],
                                                 line = list(width = 2.5, color = c(high = "#D62728", low = "#2CA02C")[[kind]])),
@@ -197,7 +214,16 @@ rare_server <- function(input, output, session) {
     if (nrow(lab_pts)) p <- add_annotations(p, x = if (isTRUE(input$rj_xlog)) log10(lab_pts$n_total) else lab_pts$n_total,
                                             y = lab_pts[[yc$point]], text = lab_pts$label, showarrow = TRUE, arrowhead = 0,
                                             ax = 22, ay = -22, font = list(size = 10, color = unname(cols[lab_pts$registry])))
-    rng <- dynamic_ranges(cv, if (nrow(pts)) pts else NULL, yc, "both", if (nrow(pts)) NULL else 50, isTRUE(input$rj_xlog))
+    uo <- u$points
+    if (!is.null(uo) && input$rj_labels != "none") {
+      if (input$rj_labels == "outliers") uo <- uo[uo$outlier != "none", ]
+      if (nrow(uo)) p <- add_annotations(p, x = if (isTRUE(input$rj_xlog)) log10(uo$n_total) else uo$n_total,
+                                         y = uo[[yc$point]], text = paste0("<b>", htmltools::htmlEscape(uo$label), "</b>"), showarrow = TRUE,
+                                         arrowhead = 0, ax = -22, ay = -22, font = list(size = 10, color = USER_COLOUR))
+    }
+    all_pts <- bind_rows(if (nrow(pts)) pts, u$points)
+    rng <- dynamic_ranges(bind_rows(cv, uc), if (nrow(all_pts)) all_pts else NULL, yc, "both",
+                          if (nrow(all_pts)) NULL else 50, isTRUE(input$rj_xlog))
     layout(p,
       xaxis = list(title = "Procedure volume (n)", type = if (isTRUE(input$rj_xlog)) "log" else "linear",
                    range = if (isTRUE(input$rj_xlog)) log10(rng$x) else rng$x, tickformat = ",", zeroline = FALSE),
@@ -208,6 +234,18 @@ rare_server <- function(input, output, session) {
                                          filename = sprintf("%s_%dyr_%s", tolower(input$rj_joint), rj_yr(), input$rj_reference)),
              displaylogo = FALSE)
   })
+
+  output$rj_ud_card <- renderUI(if (!is.null(rj_ud()$points)) user_points_card("rj_ud_table", "rj_ud_dl", "rj_ud_title"))
+  output$rj_ud_title <- renderText({
+    d <- rj_ud()$points
+    sprintf("Your models vs %s limits: %d above the upper limit (of %d comparisons)",
+            level_label(rj_out_lvl()), sum(d$outlier == "high"), nrow(d))
+  })
+  output$rj_ud_table <- renderTable(user_points_table(req(rj_ud()$points)), striped = TRUE, spacing = "s",
+                                    sanitize.text.function = identity)
+  output$rj_ud_dl <- downloadHandler(
+    filename = function() rj_file("your_models"),
+    content = function(file) readr::write_csv(user_points_csv(rj_ud()$points), file))
 
   output$rj_outlier_title <- renderText(sprintf("High outliers (above their own registry's %s upper limit): %d",
                                                 level_label(rj_out_lvl()), nrow(rj_outliers())))

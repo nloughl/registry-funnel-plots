@@ -43,6 +43,8 @@ METHODS <- c("Normal approximation (Wald)" = "normal",
 #             "Overdispersion-adjusted (multiplicative)" = "overdispersed")
 
 # ------------------------------------------------------------------------------------------------ UI
+source(file.path(APP_DIR, "user_data.R"), local = TRUE)  # "Your data" sidebar (user reference + model points), both tabs
+source(file.path(APP_DIR, "custom_tab.R"), local = TRUE)  # Custom tab: the user's own data only, no registry data
 source(file.path(APP_DIR, "rare_tab.R"), local = TRUE)   # Rare joints tab; local = TRUE: it uses ROOT / DATA_DIR defined above
 
 uka_ui <- nav_panel(paste("Knee", paste0("(", PROCEDURE, ")")), layout_sidebar(
@@ -87,8 +89,12 @@ uka_ui <- nav_panel(paste("Knee", paste0("(", PROCEDURE, ")")), layout_sidebar(
     helpText("Use the camera icon on the plot to save a PNG.")
   ),
   uiOutput("notes"),
-  card(full_screen = TRUE, card_header(textOutput("plot_title")),
-       plotlyOutput("funnel", height = "720px")),
+  card(full_screen = TRUE,
+       card_header(class = "d-flex justify-content-between align-items-center gap-2",
+                   textOutput("plot_title", inline = TRUE), user_data_toggle("ud")),
+       layout_sidebar(fillable = FALSE, border = FALSE, sidebar = user_data_sidebar("ud"),
+                      plotlyOutput("funnel", height = "720px"))),
+  uiOutput("ud_card"),
   layout_columns(
     col_widths = c(7, 5),
     card(card_header(textOutput("outlier_title")), tableOutput("outliers")),
@@ -123,13 +129,15 @@ ui <- page_navbar(
   ),
   fillable = FALSE,
   uka_ui,
-  rare_ui()
+  rare_ui(),
+  custom_ui()
 )
 
 # -------------------------------------------------------------------------------------------- server
 server <- function(input, output, session) {
   # bs_themer()
   rare_server(input, output, session)
+  custom_server(input, output, session)
 
   yr      <- reactive(as.numeric(input$year))
   levels_ <- reactive(if (input$level == "both") c(0.95, 0.998) else as.numeric(input$level))
@@ -178,14 +186,23 @@ server <- function(input, output, session) {
              outlier = case_when(p > upper_limit ~ "high", p < lower_limit ~ "low", TRUE ~ "none"))
   })
 
-  plot_regs <- reactive(intersect(means()$registry, unique(points()$registry)))
+  # "Your data": user reference + model points, judged with the same limits as the registries
+  ud <- user_data_server("ud", means = means, phis = reactive(distinct(all_points(), registry, phi)),
+                         level = out_lvl, method = reactive(input$method))
+
+  # registries with points, plus any registry the user's models are judged against (its funnel is needed)
+  plot_regs <- reactive(intersect(means()$registry,
+                                  union(unique(points()$registry), user_comparator_regs(ud()))))
+  # right end of every funnel: the largest n on the plot, registry or user
+  n_max <- reactive(max(c(points()$n_total, ud()$points$n_total), na.rm = TRUE) * 1.1)
+  ud_curves <- reactive(user_curves(ud(), levels_(), input$method, n_max()))
 
   curves <- reactive({
     req(nrow(points()) > 0)
     refs <- means() |>
       filter(registry %in% plot_regs()) |>
       left_join(distinct(all_points(), registry, phi), by = "registry") |>
-      transmute(registry, p_ref, phi = coalesce(phi, 1), n_max = max(points()$n_total) * 1.1)
+      transmute(registry, p_ref, phi = coalesce(phi, 1), n_max = n_max())
     build_limit_curves(refs, levels_(), input$method)
   })
 
@@ -193,7 +210,7 @@ server <- function(input, output, session) {
   ref_curves <- reactive({
     if (!isTRUE(input$ref_overlay %||% FALSE)) return(NULL)
     m <- filter(means(), registry %in% plot_regs())
-    refs <- reference_refs(m, c("mean", "lcl", "ucl"), n_max = max(points()$n_total) * 1.1,
+    refs <- reference_refs(m, c("mean", "lcl", "ucl"), n_max = n_max(),
                            phi = distinct(all_points(), registry, phi))
     refs <- filter(refs, reference != ref_sel())   # the selected reference is already drawn
     if (!nrow(refs)) return(NULL)
@@ -210,7 +227,7 @@ server <- function(input, output, session) {
     refs <- st |>
       left_join(phis, by = "registry") |>
       transmute(registry, design, sex, age_group, stratum, p_ref = p, phi = coalesce(phi, 1),
-                n_max = max(points()$n_total) * 1.1)
+                n_max = n_max())
     build_limit_curves(refs, out_lvl(), input$method)
   })
 
@@ -222,7 +239,7 @@ server <- function(input, output, session) {
     ph <- distinct(all_points(), registry, phi)
     per |>
       left_join(ph, by = "registry") |>
-      transmute(registry, period, p_ref = p, phi = coalesce(phi, 1), n_max = max(points()$n_total) * 1.1) |>
+      transmute(registry, period, p_ref = p, phi = coalesce(phi, 1), n_max = n_max()) |>
       build_limit_curves(out_lvl(), input$method) |>
       mutate(period = factor(period, levels = levels(per$period)))
   })
@@ -297,9 +314,32 @@ server <- function(input, output, session) {
     if (fix_sel() != "all") msgs <- c(msgs, paste0("Showing ", fix_sel(), " models only (hybrid and SIRIS ",
       "'cemented/hybrid' rows are left out). Funnels are still centred on each registry's overall UKA mean, ",
       "not a ", fix_sel(), "-only mean."))
+    u <- ud()
+    if (!is.null(u$points) || !is.null(u$ref)) msgs <- c(msgs, paste0("Your data (", htmltools::htmlEscape(u$label), ") is shown: ",
+      if (!is.null(u$ref)) paste0("black funnel around your reference rate (", scales::percent(u$ref$p_ref, 0.01), ")",
+                                  if (!is.null(u$points)) "; " else "") else "",
+      if (!is.null(u$points)) paste0(length(unique(u$points$label)), " model(s) as diamonds, filled in the colour of the reference ",
+                                     "each is judged against", if (input$layout == "panels") " (drawn in that reference's panel)" else "")
+      else "", ". Your points are not in the registry tables."))
     if (!length(msgs)) return(NULL)
     div(class = "alert alert-secondary py-2 small", HTML(paste(msgs, collapse = "<br>")))
   })
+
+  # ------------------------------------------------------------------------------------ your data
+  output$ud_card <- renderUI({
+    if (is.null(ud()$points)) return(NULL)
+    user_points_card("ud_table", "ud_dl", "ud_title")
+  })
+  output$ud_title <- renderText({
+    d <- ud()$points
+    sprintf("Your models vs %s limits: %d above the upper limit (of %d comparisons)",
+            level_label(out_lvl()), sum(d$outlier == "high"), nrow(d))
+  })
+  output$ud_table <- renderTable(user_points_table(req(ud()$points)), striped = TRUE, spacing = "s",
+                                 sanitize.text.function = identity)
+  output$ud_dl <- downloadHandler(
+    filename = function() paste0(plot_filename(), "_your_models.csv"),
+    content = function(file) readr::write_csv(user_points_csv(ud()$points), file))
 
   output$plot_title <- renderText({
     sprintf("%s: %s, %s, %d-year revision, %s limits around the %s (%s)", PROCEDURE,
@@ -333,7 +373,7 @@ server <- function(input, output, session) {
   }
 
   ring_col <- c(high = "#D62728", low = "#2CA02C")
-  add_rings <- function(p, d, xcol, ycol) {
+  add_rings <- function(p, d, xcol, ycol, showlegend = TRUE) {
     for (kind in c("high", "low")) {
       r <- d[d$outlier == kind, ]
       if (!nrow(r)) next
@@ -341,7 +381,7 @@ server <- function(input, output, session) {
                      marker = list(symbol = "circle-open", size = 18, color = ring_col[[kind]],
                                    line = list(width = 2.5, color = ring_col[[kind]])),
                      name = if (kind == "high") "Above upper limit" else "Below lower limit",
-                     legendgroup = kind, hoverinfo = "skip", inherit = FALSE)
+                     legendgroup = kind, showlegend = showlegend, hoverinfo = "skip", inherit = FALSE)
     }
     p
   }
@@ -401,14 +441,27 @@ server <- function(input, output, session) {
                          name = labs[[reg]], legendgroup = reg, showlegend = FALSE)
       }
     }
-    p <- add_rings(p, pts, "n_total", yc$point)
+    u <- ud(); uc <- ud_curves()
+    if (!is.null(u$ref)) p <- add_user_funnel(p, uc, yc, levels_(), out_lvl(), user_legend_label(u$ref), line_dash)
+    p <- add_user_points(p, u$points, yc$point, yr(), out_lvl())
+    p <- add_rings(p, bind_rows(select(pts, n_total, all_of(yc$point), outlier),
+                                if (!is.null(u$points)) select(u$points, n_total, all_of(yc$point), outlier)),
+                   "n_total", yc$point)
     {
       o <- labelled(pts)
       if (nrow(o)) p <- add_annotations(p, x = if (input$xlog) log10(o$n_total) else o$n_total, y = o[[yc$point]],
                                         text = o$label, showarrow = TRUE, arrowhead = 0, ax = 25, ay = -25,
                                         font = list(size = 10, color = unname(cols[o$registry])))
+      uo <- u$points
+      if (!is.null(uo) && label_sel() != "none") {
+        if (label_sel() == "outliers") uo <- uo[uo$outlier != "none", ]
+        if (nrow(uo)) p <- add_annotations(p, x = if (input$xlog) log10(uo$n_total) else uo$n_total, y = uo[[yc$point]],
+                                           text = paste0("<b>", htmltools::htmlEscape(uo$label), "</b>"), showarrow = TRUE, arrowhead = 0,
+                                           ax = -25, ay = -25, font = list(size = 10, color = USER_COLOUR))
+      }
     }
-    rng <- dynamic_ranges(bind_rows(cv, ref_curves(), per_curves()), pts, yc, "both", NULL, isTRUE(input$xlog))
+    rng <- dynamic_ranges(bind_rows(cv, ref_curves(), per_curves(), uc),
+                          bind_rows(pts, u$points), yc, "both", NULL, isTRUE(input$xlog))
     layout(p,
       xaxis = list(title = "Procedure volume (n)", type = if (input$xlog) "log" else "linear",
                    range = if (input$xlog) log10(rng$x) else rng$x, tickformat = ",", zeroline = FALSE),
@@ -423,6 +476,9 @@ server <- function(input, output, session) {
     cv <- curves(); pts <- points(); m <- means() |> filter(registry %in% plot_regs())
     labs <- registry_legend_labels(m, ci = TRUE); cols <- registry_colour(m$registry)
     cm <- cm_curves()
+    u <- ud(); uc <- ud_curves()
+    upts <- u$points %||% tibble::tibble(comparator = character())
+    user_legend_shown <<- FALSE
     panels <- lapply(m$registry, function(reg) {
       c1 <- filter(cv, registry == reg); d <- filter(pts, registry == reg)
       p <- plot_ly()
@@ -460,36 +516,65 @@ server <- function(input, output, session) {
         p <- add_markers(p, data = d, x = ~n_total, y = ~p, text = hover_text(d), hoverinfo = "text",
                          marker = list(color = cols[[reg]], size = 9, line = list(color = "white", width = 1)),
                          showlegend = FALSE)
-        p <- add_rings(p, d, "n_total", "p")
         o <- labelled(d)
         if (nrow(o)) p <- add_text(p, data = o, x = ~n_total, y = ~p, text = ~label, textposition = "top right",
                                    textfont = list(size = 10, color = cols[[reg]]), showlegend = FALSE,
                                    hoverinfo = "skip", inherit = FALSE)
       }
+      p <- add_user_panel_points(p, filter(upts, comparator == reg))
+      p <- add_rings(p, bind_rows(select(d, n_total, p, outlier),
+                                  select(filter(upts, comparator == reg), any_of(c("n_total", "p", "outlier")))),
+                     "n_total", "p", showlegend = FALSE)
       p
     })
+    # the user's own reference: an extra panel with its funnel and the models judged against it
+    if (!is.null(u$ref)) {
+      d <- filter(upts, comparator == USER_OWN)
+      p <- add_user_funnel(plot_ly(), uc, list(upper = "upper", lower = "lower"), levels_(), out_lvl(), NA, line_dash)
+      p <- add_lines(p, x = range(uc$n), y = rep(u$ref$p_ref, 2), line = list(color = USER_COLOUR, width = 1),
+                     showlegend = FALSE, hoverinfo = "skip")
+      p <- add_user_panel_points(p, d)
+      if (nrow(d)) p <- add_rings(p, d, "n_total", "p", showlegend = FALSE)
+      panels <- c(panels, list(p))
+    }
+    panel_ids <- c(m$registry, if (!is.null(u$ref)) USER_OWN)
+    panel_lab <- c(labs[m$registry], if (!is.null(u$ref)) stats::setNames(user_legend_label(u$ref), USER_OWN))
     # axis ranges are set after subplot(), per axis, so each panel keeps its own window
     axes <- list()
-    for (i in seq_along(m$registry)) {
-      reg <- m$registry[i]
-      rng <- dynamic_ranges(bind_rows(filter(cv, registry == reg),
-                                      if (reg == "LROI") per_curves()), filter(pts, registry == reg),
-                            y_cols("absolute"), "both", NULL, isTRUE(input$xlog))
+    for (i in seq_along(panel_ids)) {
+      reg <- panel_ids[i]
+      up <- filter(upts, comparator == reg)
+      rng <- dynamic_ranges(if (reg == USER_OWN) uc else bind_rows(filter(cv, registry == reg), if (reg == "LROI") per_curves()),
+                            bind_rows(filter(pts, registry == reg), if (nrow(up)) up),
+                            y_cols("absolute"), "both", if (reg == USER_OWN && !nrow(up)) 100, isTRUE(input$xlog))
       sfx <- if (i == 1) "" else i
       axes[[paste0("xaxis", sfx)]] <- list(type = if (input$xlog) "log" else "linear", tickformat = ",",
                                            range = if (input$xlog) log10(rng$x) else rng$x)
       axes[[paste0("yaxis", sfx)]] <- list(tickformat = ".1%", range = c(max(0, rng$y[1]), rng$y[2]))
     }
     nr <- ceiling(length(panels) / 3)
-    titles <- lapply(seq_along(m$registry), function(i) {
-      list(text = paste0("<b>", labs[[m$registry[i]]], "</b>"), showarrow = FALSE, font = list(size = 12),
+    titles <- lapply(seq_along(panel_ids), function(i) {
+      list(text = paste0("<b>", htmltools::htmlEscape(panel_lab[[panel_ids[i]]]), "</b>"), showarrow = FALSE, font = list(size = 12),
            xref = paste0("x", if (i == 1) "" else i, " domain"), yref = paste0("y", if (i == 1) "" else i, " domain"),
            x = 0.5, y = 1.08, xanchor = "center")
     })
     sp <- subplot(panels, nrows = nr, shareX = FALSE, shareY = FALSE, titleX = FALSE, titleY = FALSE,
                   margin = c(0.04, 0.04, 0.09, 0.06))
-    do.call(layout, c(list(sp, showlegend = !is.null(per_curves()), hoverlabel = list(align = "left"), annotations = titles), axes)) |>
+    do.call(layout, c(list(sp, showlegend = !is.null(per_curves()) || nrow(upts) > 0, hoverlabel = list(align = "left"), annotations = titles), axes)) |>
       config(toImageButtonOptions = list(format = "png", filename = plot_filename(), scale = 3), displaylogo = FALSE)
+  }
+
+  # user points in one panel (rate scale), labelled unless labels are off
+  user_legend_shown <- FALSE
+  add_user_panel_points <- function(p, d) {
+    if (is.null(d) || !nrow(d)) return(p)
+    p <- add_user_points(p, d, "p", yr(), out_lvl(), show_legend = !user_legend_shown)
+    user_legend_shown <<- TRUE
+    o <- switch(label_sel(), none = d[0, ], outliers = d[d$outlier != "none", ], d)
+    if (nrow(o)) p <- add_text(p, x = o$n_total, y = o$p, text = paste0("<b>", htmltools::htmlEscape(o$label), "</b>"), textposition = "top left",
+                               textfont = list(size = 10, color = USER_COLOUR), showlegend = FALSE,
+                               hoverinfo = "skip", inherit = FALSE)
+    p
   }
 
   plot_filename <- function() {

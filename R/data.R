@@ -4,16 +4,29 @@
 #   UKA_long.csv          one row per device x time point
 #   UKA_casemix_long.csv  one row per case-mix stratum x sex x time point
 
-load_extraction <- function(data_dir, procedure = "UKA") {
+#' report_years: "latest" (default) keeps the newest report year per registry, so a regextract run with
+#' several editions (`--year 2024 2025`) cannot mix them; "all" keeps every row; or a vector of years.
+load_extraction <- function(data_dir, procedure = "UKA", report_years = "latest") {
   read <- function(f) readr::read_csv(file.path(data_dir, f), show_col_types = FALSE, guess_max = 1e5)
   # drop trademark signs (e.g. EPRD "SIGMA(TM)"): they break string handling in non-UTF-8 R sessions
   clean <- function(d) dplyr::mutate(d, dplyr::across(dplyr::where(is.character),
                                                       ~ gsub("\u2122", "", .x, fixed = TRUE, useBytes = TRUE)))
   read <- function(f) clean(readr::read_csv(file.path(data_dir, f), show_col_types = FALSE, guess_max = 1e5))
+  pick_years <- function(d) {
+    if (is.null(d) || !nrow(d) || identical(report_years, "all")) return(d)
+    if (is.numeric(report_years)) return(dplyr::filter(d, report_year %in% report_years))
+    keep <- d |> dplyr::group_by(registry) |> dplyr::filter(report_year == max(report_year)) |> dplyr::ungroup()
+    dropped <- dplyr::anti_join(dplyr::distinct(d, registry, report_year), dplyr::distinct(keep, registry, report_year),
+                                by = c("registry", "report_year"))
+    if (nrow(dropped)) message("load_extraction: using the latest report per registry; dropped ",
+                               paste(sprintf("%s %s", dropped$registry, dropped$report_year), collapse = ", "),
+                               " (set report_years = \"all\" or a year to keep them)")
+    keep
+  }
   list(
-    device  = read(paste0(procedure, "_long.csv")),
+    device  = pick_years(read(paste0(procedure, "_long.csv"))),
     casemix = if (file.exists(file.path(data_dir, paste0(procedure, "_casemix_long.csv"))))
-                read(paste0(procedure, "_casemix_long.csv")) else NULL
+                pick_years(read(paste0(procedure, "_casemix_long.csv"))) else NULL
   )
 }
 

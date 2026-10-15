@@ -250,6 +250,33 @@ for (fam in fams) {
 
 Labels in the all-models figure follow `label_points` (`flagged` uses the status at the `r level_label(LV)` level). The family figure labels every model.
 
+## B4 registries overlaid with case-mix envelopes {#option-b4}
+
+Both registries on one plot, as in the Shiny app's "Registry mean + case-mix envelope" view, with the model deviations of B3 added.
+
+* **Funnels (registry colour):** the line is the registry-mean funnel; the shaded band is the case-mix envelope, the range of the limits of all age-sex classes (classes with at least `r P$min_class_n` procedures), each centred on 0 so only the width differs. Thin dashed lines mark the envelope edges. The width depends only on the rate and n, so envelopes of different registries can line up: for example, the AOANJRR lowest-risk class (`r cm_ext$low_class[cm_ext$registry == "AOANJRR"]`, `r pct(cm_ext$p_low[cm_ext$registry == "AOANJRR"], 0.01)`) has almost the same rate as the NJR mean (`r pct(cm_ext$p_mean[cm_ext$registry == "NJR"], 0.01)`), so the inner edge of the AOANJRR envelope lies almost on the NJR mean funnel.
+* **Points:** each model has three deviations joined by a line in its registry colour (point shape and outline also mark the registry): **black** = model rate − registry mean, **blue** = model rate − lowest-risk class rate, **red** = model rate − highest-risk class rate.
+* **How to read it:** compare the black point with the registry-mean line, the blue point with the **inner** edge of the envelope (narrowest funnel = lowest-risk class) and the red point with the **outer** edge (widest funnel = highest-risk class). A red point above the outer edge is high even against the least favourable patient mix.
+
+```{r option_b4, results = "asis", fig.width = 12, fig.height = 7}
+env_width <- cm_class_envelope(classes, means, LEVELS, P$limit_method, n_max, shifted = FALSE)
+b4_sub <- "Line: registry-mean funnel; shaded: age-sex class envelope. Black: vs mean; blue: vs lowest-risk class (inner edge); red: vs highest-risk class (outer edge)"
+for (lv in LEVELS) {
+  cat("\n\n### All models, ", level_label(lv), "\n\n", sep = "")
+  p <- plot_cm_envelope_overlay(cl, curves_width, env_width, means, lv, P$label_points, P$x_log,
+         title = paste0(P$procedure, " ", T_YR, "-year revision: registries overlaid with case-mix envelopes (", level_label(lv), ")"),
+         subtitle = b4_sub, caption = paste("Funnels centred on 0 (width of each reference).", src_note))
+  print(p); save_fig(p, paste0("envelope_overlay_", lv * 1000), 12, 7)
+  for (fam in fams) {
+    cat("\n\n### ", fam, ", ", level_label(lv), "\n\n", sep = "")
+    p <- plot_cm_envelope_overlay(filter(cl, family == fam), curves_width, env_width, means, lv, "all", P$x_log,
+           title = paste0(fam, ": registries overlaid with case-mix envelopes (", level_label(lv), ")"),
+           subtitle = b4_sub, caption = paste("Funnels centred on 0 (width of each reference).", src_note))
+    print(p); save_fig(p, paste0("envelope_overlay_", gsub("[^a-z0-9]+", "_", tolower(fam)), "_", lv * 1000), 12, 7)
+  }
+}
+```
+
 # A and B give the same answer {#equivalence}
 
 The two options are the same comparison drawn two ways. For any reference rate $p_{ref}$:
