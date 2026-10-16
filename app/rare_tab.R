@@ -22,8 +22,7 @@ rare_ui <- function() {
         uiOutput("rj_year_ui"),
         uiOutput("rj_family_ui"),
         uiOutput("rj_registries_ui"),
-        radioButtons("rj_level", "Control limit",
-                     choices = c("99.8%" = "0.998", "95%" = "0.95", "Both" = "both"), selected = "0.998", inline = TRUE),
+        limit_input("rj_level", selected = "0.998"),
         selectInput("rj_method", "Funnel distribution", choices = METHODS),
         radioButtons("rj_reference", "Funnel reference", choices = REFERENCES, selected = "mean"),
         conditionalPanel("input.rj_joint == 'ELBOW'",
@@ -75,7 +74,7 @@ rare_server <- function(input, output, session) {
     selectInput("rj_year", "Follow-up year", choices = yrs, selected = if (3 %in% yrs) 3 else yrs[1])
   })
   rj_yr <- reactive(as.numeric(req(input$rj_year)))
-  rj_levels <- reactive(if (input$rj_level == "both") c(0.95, 0.998) else as.numeric(input$rj_level))
+  rj_levels <- reactive(limit_levels(input$rj_level))
   rj_out_lvl <- reactive(max(rj_levels()))
 
   rj_all_means <- reactive(rare_means(rj_ext(), RARE_CFG, rj_yr()))
@@ -186,7 +185,7 @@ rare_server <- function(input, output, session) {
         c1 <- filter(cv, registry == reg, level == lv)
         for (side in c("upper", "lower")) {
           p <- add_lines(p, data = c1, x = ~n, y = c1[[yc[[side]]]],
-                         line = list(color = cols[[reg]], width = 1.8, dash = if (lv >= 0.998) "solid" else "dash"),
+                         line = list(color = cols[[reg]], width = 1.8, dash = limit_dash(lv)),
                          name = labs[[reg]], legendgroup = reg, showlegend = side == "upper" && lv == max(rj_levels()),
                          hovertemplate = paste0(reg, " ", level_label(lv), " ", side, " limit<br>n = %{x:,}<br>%{y:.2%}<extra></extra>"))
         }
@@ -198,7 +197,7 @@ rare_server <- function(input, output, session) {
     }
     u <- rj_ud(); uc <- rj_ud_curves()
     if (!is.null(u$ref)) p <- add_user_funnel(p, uc, yc, rj_levels(), rj_out_lvl(), user_legend_label(u$ref),
-                                              function(lv) if (lv >= 0.998) "solid" else "dash")
+                                              limit_dash)
     p <- add_user_points(p, u$points, yc$point, rj_yr(), rj_out_lvl())
     ring_pts <- bind_rows(if (nrow(pts)) select(pts, n_total, all_of(yc$point), outlier),
                           if (!is.null(u$points)) select(u$points, n_total, all_of(yc$point), outlier))

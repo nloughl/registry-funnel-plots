@@ -14,6 +14,16 @@
 # own table.
 
 USER_COLOUR <- "#222222"   # not a registry colour (see R/palette.R)
+
+# Control limits offered on the Rare joints and Custom tabs. Several can be drawn; outliers are judged
+# at the widest one ticked. Plotly line style per level: 99.8% solid, 95% dashed, 90% dotted.
+LIMIT_CHOICES <- c("90%" = "0.9", "95%" = "0.95", "99.8%" = "0.998")
+limit_dash <- function(lv) if (lv >= 0.998) "solid" else if (lv >= 0.95) "dash" else "dot"
+limit_levels <- function(x) { lv <- sort(as.numeric(x)); if (length(lv)) lv else 0.998 }   # none ticked: 99.8%
+limit_input <- function(id, selected) {
+  tagList(checkboxGroupInput(id, "Control limits", choices = LIMIT_CHOICES, selected = selected, inline = TRUE),
+          helpText(class = "mt-n2", "99.8% solid, 95% dashed, 90% dotted. Outliers are judged at the widest limit ticked."))
+}
 USER_OWN    <- "__own__"   # comparator id for the user's own reference
 
 # --------------------------------------------------------------------------------------------- UI

@@ -55,8 +55,7 @@ custom_ui <- function() {
         hr(),
         radioButtons("cu_compare", "Judge each set's points against",
                      choices = c("Its own funnel" = "own", "Every funnel" = "all"), selected = "own", inline = TRUE),
-        radioButtons("cu_level", "Control limit",
-                     choices = c("99.8%" = "0.998", "95%" = "0.95", "Both" = "both"), selected = "both", inline = TRUE),
+        limit_input("cu_level", selected = c("0.95", "0.998")),
         selectInput("cu_method", "Funnel distribution", choices = METHODS),
         radioButtons("cu_yscale", "Y scale",
                      choices = c("Revision rate (funnels at their own references)" = "absolute",
@@ -146,7 +145,7 @@ custom_server <- function(input, output, session) {
 
   # where points go on the standardised scales; "each" only applies with Every funnel
   std_points <- reactive(if (input$cu_compare == "all") input$cu_std_points %||% "own" else "own")
-  cu_levels  <- reactive(if (input$cu_level == "both") c(0.95, 0.998) else as.numeric(input$cu_level))
+  cu_levels  <- reactive(limit_levels(input$cu_level))
   cu_out_lvl <- reactive(max(cu_levels()))
 
   # one entry per shown set: name, colour, parsed points, reference (or NULL)
@@ -284,7 +283,7 @@ custom_server <- function(input, output, session) {
         cfg())
     }
     p <- plot_ly()
-    dash <- function(lv) if (lv >= 0.998) "solid" else "dash"
+    dash <- limit_dash
     for (k in seq_len(nrow(r))) {
       rk <- r[k, ]
       c1 <- dplyr::filter(cv, set_id == rk$set_id)
