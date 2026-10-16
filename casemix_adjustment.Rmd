@@ -107,7 +107,7 @@ cm_ext |>
   knitr::kable(caption = "References per registry")
 ```
 
-The **classes pooled** column is the n-weighted average of the class rates. It should be close to the registry mean. If it is not, the age-sex table covers a different population from the registry mean. For example, KP22 covers OA only, and the NJR mean is the "All unicompartmental" row.
+The **classes pooled** column is the n-weighted average of the class rates. It should be close to the registry mean. If it is not, the age-sex table covers a different population from the registry mean. For example, the NJR class table and its "All unicompartmental" mean may differ slightly in scope. AOANJRR KP22 and its registry mean (KP18) both cover primary UKA for OA, so the two should agree closely.
 The last column shows how much wider the highest-risk funnel is than the registry-mean funnel. The shift columns are far larger than that change in width.
 
 # Option A: adjusted funnels {#option-a}
@@ -338,6 +338,6 @@ The excess revisions against the highest-risk class are a **lower bound** for ea
 * **The extremes are wide.** The lowest- and highest-risk classes are the two ends of the age-sex distribution, so most models' plausible range is much narrower than shown. The status categories are deliberately conservative. "High under every reference" is a strong signal; "High vs mean, not vs highest-risk class" is hypothesis-generating.
 * **Only age and sex.** Diagnosis, medial vs lateral compartment, surgeon and hospital volume, BMI and activity also affect revision, and none of them is in these tables.
 * **NJR fixation blocks are pooled.** NJR 3.K6 splits each age-sex class into cemented and uncemented/hybrid. Fixation is a model attribute, not a patient characteristic. Adjusting a cemented model against the cemented-only class rates would partly remove the effect of the design being screened, so the blocks are pooled per class (n-weighted).
-* **Different populations.** AOANJRR KP22 covers primary UKA for OA, while the device table and the registry mean cover all diagnoses. The NJR class tables and the "All unicompartmental" mean may also differ slightly in scope. The "classes pooled (check)" column above shows the size of the mismatch.
+* **Different populations.** AOANJRR KP22 and the registry mean (KP18) cover primary UKA for OA, while the device table (KP17) covers all diagnoses. The NJR class tables and the "All unicompartmental" mean may also differ slightly in scope. The "classes pooled (check)" column above shows the size of the mismatch.
 * **Extremes are chosen by observed rate.** The highest-risk class is the class with the highest observed rate, which is partly chance. With `min_class_n` = `r P$min_class_n`, classes below that size are ignored. All classes in AOANJRR and NJR are far larger.
 * **Limits treat the Kaplan-Meier estimate as a binomial proportion** and ignore censoring, as in the main report.
