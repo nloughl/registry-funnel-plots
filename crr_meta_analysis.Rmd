@@ -1,0 +1,705 @@
+---
+title: "Cumulative revision over follow-up time across registries: `r paste(params$models, collapse = ', ')`"
+author: "Naomi Loughlin"
+date: "`r format(Sys.Date())`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    code_folding: hide
+params:
+  data_dir: "../regitry-outlier-detection/outputs/UKA"   # regextract outputs (2025 reports)
+  procedure: "UKA"
+  models: ["Oxford"]          # brands from config/device_families.csv (detail level 1)
+  attribute_source: "design"  # fixation from stated report text + design knowledge (config/device_attributes.csv)
+  by_fixation: true           # add fixation subgroups (cemented / cementless / hybrid)
+  k_reg_min: 3                # registries needed for a t-based pooled CI; 2 registries -> z CI, flagged exploratory
+  test: "t"                   # "t" (t-distribution, containment df) or "z" (as Combescure et al. 2025)
+  forest_years: [1, 3, 5, 10]
+  metareg_years: [1, 3, 5, 10]
+  table34_year: 5             # follow-up year of the Table 3/4 analogues (5 years, as in the paper)
+  core_years: [1, 3, 5, 10]   # second version of every trajectory figure with these years only
+  out_dir: "figures"
+  table_dir: "tables"
+  save_png: true
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE, fig.width = 11, fig.height = 6)
+library(dplyr)
+library(ggplot2)
+for (f in list.files("R", pattern = "\\.R$", full.names = TRUE)) source(f)
+P <- params
+MODELS <- unlist(P$models)
+SLUG <- paste0("crr_ma_", tolower(P$procedure), "_", paste(tolower(gsub("[^A-Za-z0-9]+", "_", MODELS)), collapse = "_"))
+ALL <- if (length(MODELS) == 1) paste("All", MODELS) else "All models"
+f2 <- function(x, d = 2) formatC(x, digits = d, format = "f")
+ci_txt <- function(row, d = 1) sprintf("%s%% (95%% CI %s–%s%%)", f2(row$crr, d), f2(row$crr_lcl, d), f2(row$crr_ucl, d))
+save_fig <- function(p, name, width = 11, height = 6) if (isTRUE(P$save_png)) save_plot(p, paste0(SLUG, "_", name), P$out_dir, width, height)
+dir.create(P$table_dir, showWarnings = FALSE)
+GROUP_COLOURS <- c(Cemented = "#7B3294", Cementless = "#1B9E77", Hybrid = "#B8860B")   # registry colours stay reserved
+```
+
+```{r data}
+ext <- load_extraction(P$data_dir, P$procedure)                     # newest report per registry (2025)
+fam <- load_families("config/device_families.csv")
+rules <- load_attribute_rules("config/device_attributes.csv")
+inp <- crr_inputs(ext$device, fam, rules, MODELS, P$attribute_source)
+inp$design_variant <- crr_design_variant(inp)
+dropped <- attr(inp, "dropped")
+YEARS <- sort(unique(inp$time_yr))
+
+groups <- setNames(list(quote(TRUE)), ALL)
+if (length(MODELS) > 1) for (m in MODELS) groups[[m]] <- bquote(model == .(m))
+if (isTRUE(P$by_fixation)) for (g in c("Cemented", "Cementless", "Hybrid")) {
+  if (length(MODELS) == 1) groups[[g]] <- bquote(fixation_group == .(g))
+  else for (m in MODELS) groups[[paste(m, g)]] <- bquote(model == .(m) & fixation_group == .(g))
+}
+
+pooled <- crr_pool_table(inp, groups, YEARS, k_reg_min = P$k_reg_min, test = P$test)
+pooled_z <- crr_pool_table(inp, groups[1], YEARS, k_reg_min = 99, test = "z")
+main_years <- pooled |> filter(group == ALL, !exploratory) |> pull(time_yr)
+all_p <- filter(pooled, group == ALL)
+jm <- crr_joint(inp)
+joint_pred <- crr_joint_predict(jm, seq(1, max(YEARS), by = 0.25))
+joint_at <- crr_joint_predict(jm, YEARS)
+metareg <- purrr::map_dfr(unlist(P$metareg_years), ~ crr_metareg(inp, .x, P$test))
+loro <- crr_loro(inp, main_years, P$test)
+collapsed <- crr_collapsed(inp, main_years)
+collapsed_all <- crr_collapsed(inp, YEARS)        # pooled from one estimate per registry (all years with >= 2 registries)
+reg_level <- crr_registry_collapse(inp)           # one estimate per registry x year
+w_tab5 <- crr_registry_weights(inp, 5)
+t34 <- purrr::map_dfr(MODELS, function(m) purrr::map_dfr(unlist(P$metareg_years), function(t) {
+  d <- filter(inp, model == m)
+  tag <- function(x, lab) if (is.null(x)) NULL else mutate(x, table = lab)
+  bind_rows(tag(crr_table34(d, t, "fixation", P$test), "Table 3: registry + fixation"),
+            tag(crr_table34(d, t, "design_variant", P$test), "Table 4: registry + design variant")) |>
+    mutate(model = m)
+}))
+t3_5 <- filter(t34, model == MODELS[1], time_yr == P$table34_year, grepl("^Table 3", table))
+t4_5 <- filter(t34, model == MODELS[1], time_yr == P$table34_year, grepl("^Table 4", table))
+t4_dv <- filter(t4_5, variable == "Design variant", !reference)
+t4_reg <- filter(t4_5, variable == "Registry", !reference)
+no_lat <- crr_pool_table(filter(inp, !lateral), groups[1], main_years, P$k_reg_min, P$test)
+
+# numbers used in the text
+pk <- function(t, g = ALL) filter(pooled, group == g, time_yr == t)
+obs5 <- filter(inp, time_yr == 5)
+mr5 <- filter(metareg, time_yr == 5)
+mr10 <- filter(metareg, time_yr == 10)
+het <- filter(pooled, group == ALL, !exploratory)
+reg_ref <- mr5$reference[mr5$variable == "Registry"][1]
+loro_ref <- loro |> filter(left_out == reg_ref)
+fix_p <- function(t) { m <- filter(metareg, time_yr == t); if (nrow(m)) m$fixation_p[1] else NA }
+```
+
+# Executive summary
+
+**What this file does.** It follows the cumulative revision rate (CRR) of one knee model brand (`r paste(MODELS, collapse = ", ")`) over follow-up time in `r n_distinct(inp$registry)` national registries (`r paste(sort(unique(inp$registry)), collapse = ", ")`; 2025 annual reports). It also pools those rates across registries at every follow-up year that at least two registries report. The approach adapts the statistical methods of Combescure et al. (2025), who pooled published CRRs of hip cups and stems across registries ([doi:10.1530/EOR-2024-0020](https://doi.org/10.1530/EOR-2024-0020)). Here a knee model brand takes the place of the cup or stem, and the variants of that brand that each registry lists take the place of the associated implant. For Oxford, a variant is a fixation, peg design, bearing surface or compartment, for example NJR single peg vs twin peg, or EPRD TiNbN vs standard.
+
+**Methods in brief.**
+
+1. **Data.** Every published estimate with a 95% CI, from the regextract outputs (`UKA_long.csv`). The brand is defined at **detail level 1** of the funnels project (`config/device_families.csv`). The registry rows are *not* collapsed to one point per registry: each row keeps its own published CI and enters the model as a variant.
+2. **Transformation.** Revision-free survival is put on the **complementary log–log (cloglog) scale**. Each estimate's standard error is backed out of the transformed 95% CI ([Methods](#methods)).
+3. **Per-year pooling.** At each follow-up year, a **random-effects model** (REML) is fitted with variants nested within registries (`metafor::rma.mv`). The pooled cloglog value is back-transformed to a CRR. Unlike the paper, CIs use a t-distribution with containment df, because only five registries contribute.
+4. **Heterogeneity.** Cochran's Q and a multilevel I². **Multivariable meta-regressions** on registry + fixation (Table 3 analogue) and on registry + design variant (Table 4 analogue) give adjusted hazard ratios.
+5. **Additions to the paper.**
+   - Fixation subgroups.
+   - A **single model across all follow-up years** (Weibull-type cloglog curve with registry- and variant-level random slopes). This addresses the limitation the paper itself names: separate per-year pooling multiplies tests and can give non-monotone pooled curves.
+   - Sensitivity analyses: z vs t CIs, excluding lateral variants, collapsing to one estimate per registry, and leave-one-registry-out.
+
+**Outputs.**
+
+- [Figure 1 analogue](#fig1): pooled CRR over time, overall and by fixation.
+- [Figure 2 analogue](#fig2): every registry variant's CRR over time (one line per registry row), with pooled estimates.
+- [One line per registry](#per-registry): the same data collapsed to one estimate per registry, with an explanation of how the model handles registries that report several rows, and each registry's weight under each approach.
+- Every trajectory figure comes in two versions: all available follow-up years, and the core years only (`r paste(unlist(P$core_years), collapse = ", ")`; files ending `_core`).
+- [Table 2 analogue](#table2): pooled CRR (95% CI) by follow-up year.
+- [Table 3 and Table 4 analogues](#metareg): multivariable models of the `r P$table34_year`-year CRR on registry + fixation (Table 3) and on registry + design variant (Table 4), with the same models at the other years.
+- [Heterogeneity](#het) and [forest plots](#forest).
+- Figures are written to `figures/`, named `r SLUG`_*.png. The Table 2 and Table 3/4 analogues are written to `tables/`.
+
+# Highlights {#highlights}
+
+```{r highlights, results = "asis", echo = FALSE}
+if (length(MODELS) > 1) {
+  cat("- The automatic highlights are written for a single-brand run. For several brands, read the [Table 2 analogue](#table2) and the [Figure 1 analogue](#fig1).\n")
+} else {
+reg_hr <- filter(mr5, variable == "Registry") |> arrange(desc(HR))
+fx5 <- filter(mr5, variable == "Fixation"); fx10 <- filter(mr10, variable == "Fixation")
+cl10 <- filter(fx10, level == "cementless")
+obs_reg5 <- obs5 |> group_by(registry) |> summarise(lo = min(estimate), hi = max(estimate))
+cat(sprintf("- **Pooled %s CRR** (%s registries, %s variants): %s at 1 year, %s at 3 years, %s at 5 years and %s at 10 years.\n",
+            MODELS[1], pk(5)$k_reg, pk(5)$k, ci_txt(pk(1)), ci_txt(pk(3)), ci_txt(pk(5)), ci_txt(pk(10))))
+cat(sprintf("- **Longer follow-up** is published by only two registries per year, so these estimates are exploratory. %s",
+            paste(sprintf("At %s years the pooled CRR is %s%% (%s).", all_p$time_yr[all_p$exploratory], f2(all_p$crr[all_p$exploratory], 1),
+                          all_p$registries[all_p$exploratory]), collapse = " ")),
+    sprintf("The single model across all years, which uses every published time point, gives %s at 15 years and %s at 20 years.\n",
+            ci_txt(filter(joint_at, time_yr == 15)), ci_txt(filter(joint_at, time_yr == 20))))
+cat(sprintf("- **The pooled CRR beyond 10 years reflects a changing mix of variants.** By 20 years only %s still report, so the per-year \"pooled\" value describes older designs, not the brand as it is used today. That is why it sits well above the joint-model curve.\n",
+            paste(filter(inp, time_yr == max(all_p$time_yr))$row_id, collapse = " and ")))
+cat(sprintf("- **Prediction interval.** The 95%% prediction interval for the 5-year CRR in a new registry or variant is %s\u2013%s%%, much wider than the CI of the pooled mean (%s\u2013%s%%). It is the range a single registry's Oxford rate can be expected to fall in.\n",
+            f2(pk(5)$pi_lcl, 1), f2(pk(5)$pi_ucl, 1), f2(pk(5)$crr_lcl, 1), f2(pk(5)$crr_ucl, 1)))
+cat(sprintf("- **Heterogeneity is very high at every follow-up year** (Cochran's Q p < 0.001; I² %s–%s%%). At 5 years, the published 5-year CRRs of the individual variants range from %s%% to %s%%.\n",
+            f2(min(het$I2_total), 1), f2(max(het$I2_total), 1), f2(min(obs5$estimate), 1), f2(max(obs5$estimate), 1)))
+cat(sprintf("- **Registry differences are larger than fixation differences.** At 5 years, after adjusting for fixation, %s has a higher CRR than %s (the largest-volume registry). The HR is %s.",
+            if (all(reg_hr$HR > 1)) "every other registry" else "most registries", reg_ref, paste(sprintf("%s %s (%s–%s)", reg_hr$level, f2(reg_hr$HR), f2(reg_hr$HR_lcl), f2(reg_hr$HR_ucl)), collapse = ", ")),
+    sprintf("The fixation terms, tested together and adjusted for registry, give p = %s at 1 year, %s at 3 years, %s at 5 years and %s at 10 years.", f2(fix_p(1), 2), f2(fix_p(3), 2), f2(fix_p(5), 2), f2(fix_p(10), 2)),
+    if (nrow(cl10)) sprintf("Cementless vs cemented: HR %s (%s–%s) at 10 years.\n", f2(cl10$HR), f2(cl10$HR_lcl), f2(cl10$HR_ucl)) else "\n")
+cat(sprintf("- **%s pulls the pooled CRR down.** Leaving %s out raises the 5-year pooled CRR from %s%% to %s%%. Leaving out any other registry changes it by at most %s percentage points. Whether NJR's low rate is a property of the implant or of the registry (population, surgeon volume, revision threshold, definition of revision) cannot be told apart with aggregate data.\n",
+            reg_ref, reg_ref, f2(pk(5)$crr, 1), f2(filter(loro_ref, time_yr == 5)$crr, 1),
+            f2(max(abs(filter(loro, time_yr == 5, left_out != reg_ref)$crr - pk(5)$crr)), 1)))
+cat(sprintf("- **By fixation**, the pooled 10-year CRR is %s for cemented, %s for cementless and %s for hybrid fixation%s. The CIs overlap.\n",
+            ci_txt(pk(10, "Cemented")), ci_txt(pk(10, "Cementless")),
+            if (nrow(pk(10, "Hybrid"))) ci_txt(pk(10, "Hybrid")) else "not estimable",
+            if (nrow(pk(10, "Hybrid")) && pk(10, "Hybrid")$exploratory) " (2 registries only)" else ""))
+cat(sprintf("- **The results hold up in the sensitivity analyses.** Excluding the lateral variants gives a 5-year CRR of %s%%. Collapsing to one estimate per registry gives %s%%. The single model across all years agrees with the per-year pooled estimates to within %s percentage points at 1–10 years, and it increases monotonically.\n",
+            f2(filter(no_lat, time_yr == 5)$crr, 1), f2(filter(collapsed, time_yr == 5)$crr, 1),
+            f2(max(abs(inner_join(all_p, joint_at, by = "time_yr") |> filter(time_yr %in% main_years) |> mutate(d = crr.x - crr.y) |> pull(d))), 1)))
+cat(sprintf("- **Several rows per registry are handled by the model.** Variants are nested within registry. Because Oxford's variants genuinely differ, NJR and EPRD (5 rows each) still carry about %s%% and %s%% of the weight at 5 years. Collapsing to one estimate per registry gives each registry about 20%% and a pooled 5-year CRR of %s%%, compared with %s%%. Both versions are shown.\n",
+            f2(filter(w_tab5, registry == "NJR")$w_nested, 0), f2(filter(w_tab5, registry == "EPRD")$w_nested, 0),
+            f2(filter(collapsed_all, time_yr == 5)$crr, 1), f2(pk(5)$crr, 1)))
+cat(sprintf("- **Table 3/4 analogues (5-year CRR).** With fixation, registry is significant (joint p = %s); fixation is not (p = %s). With the finer design variants (Table 4), the registry HRs shrink (SIRIS %s, AOANJRR %s vs NJR) and neither factor is significant (registry p = %s, design variant p = %s). Part of the apparent registry effect is the mix of variants each registry lists.\n",
+            f2(filter(t3_5, variable == "Registry", reference)$omnibus_p, 3), f2(filter(t3_5, variable == "Fixation", reference)$omnibus_p, 2),
+            f2(filter(t4_reg, level == "SIRIS")$HR), f2(filter(t4_reg, level == "AOANJRR")$HR),
+            f2(filter(t4_5, variable == "Registry", reference)$omnibus_p, 2), f2(filter(t4_5, variable == "Design variant", reference)$omnibus_p, 2)))
+cat("- **What this means for outlier detection.** A brand-level pooled CRR is a reasonable cross-registry benchmark only together with its prediction interval and the registry effects. A comparison of one registry's rate against a pooled international rate is confounded by registry, before any implant effect. Comparing a model with its own registry's mean, as the funnels do, removes that confounding.\n")
+}
+```
+
+# Data {#data}
+
+```{r data-table}
+rows <- inp |>
+  group_by(registry, row_id, label, fixation, fixation_group, lateral, n_total, metric_type, table_id) |>
+  summarise(years = paste(time_yr, collapse = ", "), .groups = "drop") |>
+  arrange(registry, desc(n_total))
+knitr::kable(transmute(rows, Registry = registry, Variant = label, Fixation = fixation, Lateral = ifelse(lateral, "yes", ""),
+                       n = scales::comma(n_total), Metric = metric_type, Table = table_id, `Follow-up years with CRR + CI` = years),
+             caption = sprintf("%s variants included (%s rows x years). Report year: %s.", nrow(rows), nrow(inp),
+                               paste(unique(ext$device$report_year), collapse = "/")))
+```
+
+`r if (nrow(dropped)) sprintf("%s registry row x year cells were not used because they have no estimate or no usable CI (blank, not reported, or a CI bound at 0 or 100%%): %s.", nrow(dropped), paste(sort(unique(sprintf("%s %s %s y", dropped$registry, dropped$label, dropped$time_yr))), collapse = "; ")) else "Every cell with an estimate had a usable CI."`
+
+**Follow-up years.** Every registry reports 1, 3, 5 and 10 years. Beyond that, the years differ:
+
+- **EPRD:** every year from 1 to 10.
+- **LROI:** 7 and 16 years.
+- **SIRIS:** 12 years.
+- **AOANJRR and NJR:** 15 and 20 years.
+
+```{r years}
+knitr::kable(inp |> group_by(`Follow-up year` = time_yr) |>
+               summarise(Registries = paste(sort(unique(registry)), collapse = ", "), k_reg = n_distinct(registry),
+                         `Variants` = n(), .groups = "drop") |>
+               mutate(`Pooled?` = case_when(k_reg >= P$k_reg_min ~ "yes (t CI)",
+                                            k_reg == 2 ~ "exploratory (z CI)",
+                                            TRUE ~ "no (single registry; used in the joint model only)")) |>
+               select(-k_reg),
+             caption = "Estimates available per follow-up year")
+```
+
+# Methods {#methods}
+
+## From published CRR to the cloglog scale
+
+Each registry publishes, for a variant $i$ at follow-up time $t$, a Kaplan–Meier cumulative revision percentage $\text{CRR}_i(t)$ with a 95% CI $[L_i, U_i]$. Writing revision-free survival as $S = 1 - \text{CRR}/100$, the complementary log–log transform is
+
+$$y_i = \log\{-\log S_i(t)\} = \log H_i(t),$$
+
+where $H(t) = -\log S(t)$ is the cumulative hazard. The same transform is applied to the CI bounds, and the standard error is backed out of the transformed interval:
+
+$$\text{SE}_i = \frac{\log\{-\log(1 - U_i/100)\} - \log\{-\log(1 - L_i/100)\}}{2 \times 1.96}, \qquad v_i = \text{SE}_i^2 .$$
+
+Pooled values $\hat\mu$ are back-transformed with $\text{CRR} = 100\,\{1 - \exp(-e^{\hat\mu})\}$, and the CI bounds the same way.
+
+**Why cloglog.**
+
+- It maps proportions in (0, 1) to the whole real line, so pooled values and CIs back-transform to valid percentages.
+- KM CIs computed with the log–log method, used by AOANJRR and NJR, are symmetric on this scale.
+- A difference on this scale is a log ratio of cumulative hazards. Under proportional hazards that is the log hazard ratio, so exponentiated meta-regression coefficients are HRs.
+- $\log H(t)$ is linear in $\log t$ for a Weibull survival curve, which makes a model across follow-up years natural (see [below](#joint-method)).
+
+**Is the symmetry assumption reasonable?** The table gives the ratio of the upper to the lower half-width of each published CI on the cloglog scale (1 = symmetric).
+
+```{r asym}
+knitr::kable(inp |> group_by(Registry = registry) |>
+               summarise(`Median ratio` = f2(median(ci_asym)), `Range` = paste(f2(min(ci_asym)), "–", f2(max(ci_asym))),
+                         `CI method in report` = first(metric_type), .groups = "drop"),
+             caption = "CI symmetry on the cloglog scale (upper / lower half-width)")
+```
+
+AOANJRR, NJR and SIRIS are essentially symmetric. EPRD and LROI CIs are a little narrower above the estimate than below, which is what a plain (linear-scale Greenwood) CI looks like after the transform. Averaging the two half-widths, as done here and in the paper, is therefore a close approximation.
+
+## Pooling per follow-up year {#per-year}
+
+At each follow-up year, the model is
+
+$$y_{rj} = \mu + u_r + w_{rj} + \varepsilon_{rj}, \quad u_r \sim N(0, \sigma^2_{\text{registry}}),\; w_{rj} \sim N(0, \sigma^2_{\text{variant}}),\; \varepsilon_{rj} \sim N(0, v_{rj}),$$
+
+with registry $r$ and variant $j$ within registry. It is fitted by REML (`metafor::rma.mv`, `random = ~ 1 | registry/row`). As in the paper, a random-effect level that cannot be estimated is dropped. That happens when only one registry contributes, or when each registry has a single variant, as in the cementless subgroup. $\hat\mu$ is the pooled CRR on the cloglog scale.
+
+**CI method (a deviation from the paper).** The paper used normal (z) CIs. With 5 registries, z intervals under-cover, so the primary CIs here use a t-distribution with **containment degrees of freedom** (`dfs = "contain"`), which ties the df to the number of registries. When only two registries report a year, $t_1$ intervals are uninformative. Those years are given with z CIs and flagged *exploratory*. A [sensitivity table](#sens) shows the z intervals for every year.
+
+**Heterogeneity.**
+
+- **Cochran's Q** with its p-value.
+- **Multilevel I²**: the share of total variance due to the random effects, $\sum\sigma^2 / (\sum\sigma^2 + \tilde v)$, where $\tilde v$ is the typical sampling variance (Higgins & Thompson's definition, generalised to several levels).
+- **σ² per level.** This shows whether the spread is *between registries* or *between variants within a registry*. In the earlier Oxford funnel/meta-analysis work, the variant level was the one that dominated for cemented Oxford.
+
+**Meta-regression.** At 1, 3, 5 and 10 years, $y$ is regressed on fixation + registry, with a random effect for each variant (the paper's model, with fixation in the place of the associated implant). The reference category of each factor is the one with the most procedures, as in the paper. For Oxford that is cemented fixation and the NJR. $\exp(\beta)$ is a hazard ratio (ratio of cumulative hazards).
+
+## One model across follow-up years {#joint-method}
+
+The per-year analyses reuse the same patients at every year and can give pooled curves that are not monotone. The paper names this as its main methodological gap. Here, all rows and all published years go into one model:
+
+$$y_{rj}(t) = \beta_0 + \beta_1 \log t + \beta_2 (\log t)^2 + (u_{0r} + u_{1r}\log t) + (w_{0rj} + w_{1rj}\log t) + \varepsilon_{rj}(t).$$
+
+- $\beta_2 = 0$ would be a Weibull curve; the quadratic term lets the shape of the hazard change.
+- Registry and variant each get a random intercept and a random $\log t$ slope (`struct = "GEN"`).
+- **Within-row correlation.** Estimates of the same row at different years share patients. Cumulative-hazard estimates have approximately independent increments, so for $t_j \le t_k$:
+
+  $$\text{Cov}(\hat H_j, \hat H_k) \approx \text{Var}(\hat H_j), \qquad \text{Cov}(y_j, y_k) \approx \frac{v_j H_j^2}{H_j H_k}$$
+
+  This gives a block-diagonal sampling covariance matrix $V$. $\text{Var}(\hat H)$ is forced non-decreasing, and repeated identical estimates (KM plateaus carried forward, e.g. EPRD Oxford Lateral at 5–7 years) are dropped.
+
+This model uses the time points that only one registry publishes (EPRD 2, 4, 6, 8, 9; SIRIS 12; LROI 16). It is fitted with the same t / containment-df method. It is used as a smooth summary and a consistency check on the per-year pooling, not as the primary estimate.
+
+## Decisions {#decisions}
+
+| Decision | Choice | Justification |
+|---|---|---|
+| Report year | 2025 for all five registries (`load_extraction()` keeps the newest per registry) | As requested; LROI 2025 comes from the manual transcription checked against the report. AJRR is excluded (no brand-level UKA revision rates). |
+| Model grouping | Detail level 1 (brand, `config/device_families.csv`), with each registry row kept as a variant | The level-1 funnel point is an n-weighted pool **without a CI**, which cannot be meta-analysed. Keeping the rows with their own CIs and nesting them in registry gives the brand-level estimate while respecting within-registry correlation. This mirrors the paper, where associated implants were nested in registry. A collapsed one-estimate-per-registry version is a [sensitivity analysis](#sens). |
+| Variants included | All rows matching the brand, including lateral and hybrid rows | This is the brand-level definition requested. Excluding the lateral variants (EPRD Oxford Lateral fixed bearing; NJR rows tagged [L]) is a sensitivity analysis, because they are a different design for a different indication. |
+| Fixation | `attribute_source = "design"` | NJR names the Oxford tibia without fixation; the design rule "standard Oxford tibia is cemented" is needed to classify single peg, twin peg and the cementless-femur rows. These rows are marked *design* in `config/device_attributes.csv`. |
+| SIRIS "cemented/hybrid" | Separate level in the meta-regression; counted as cemented in the fixation subgroups | SIRIS does not split them. Most cemented/hybrid Oxford knees are fully cemented. |
+| Fixation subgroups | Cemented, cementless and hybrid, pooled separately | Requested if useful. Fixation is the main design split reported by every registry. The fixation subgroups were estimated together with registry in the meta-regression, so their difference is also tested. |
+| Follow-up years | Every year with an estimate and a CI. Pooled when ≥ `r P$k_reg_min` registries (t CI); exploratory with 2 registries (z CI); single-registry years only in the joint model | Uses all published data without presenting single-registry values as international estimates. |
+| CI method | t with containment df (primary); z (sensitivity) | z intervals are too narrow with 5 clusters (registries). |
+| Low numbers at risk | All published estimates are kept | The registries already suppress estimates below their own thresholds (EPRD < 50 at risk; NJR marks ≤ 250). The SE from the published CI already reflects the low numbers. |
+| Design variants (Table 4) | Lateral; stated non-CoCr femoral surface (TiNbN-coated); twin peg; otherwise fixation | These are the splits the reports print. Registries that do not name the peg design are counted as standard cemented, so "Cemented" mixes single peg with unspecified designs. |
+| Table 3/4 year | `r P$table34_year` years (as in the paper); the same models at 1, 3 and 10 years in a second table | All five registries report 5 years. |
+| One line per registry | Shown in addition to the variant-level figures; registry estimate = the registry's rows weighted by procedures (as detail level 1), with a CI from the rows' published CIs | The nested model is primary and already handles clustering. The collapsed view answers "the brand in a typical registry", matches detail level 1, and is a sensitivity analysis. |
+| Core-years figures | Every trajectory figure also drawn with `r paste(unlist(P$core_years), collapse = ", ")` years only | These are the years every registry reports, so every point is pooled from the same registries. |
+| Joint model | Quadratic in log t, random intercepts and slopes, approximate within-row covariance | This is the simplest model that addresses the paper's stated limitation and can still be fitted with 5 registries. |
+
+# Results
+
+```{r plot-helpers}
+# Every trajectory figure is drawn twice: with all follow-up years, and with the core years only.
+CORE <- intersect(unlist(P$core_years), YEARS)
+yr_breaks <- function(years) if (length(years) > 8) c(1, 3, 5, 7, 10, 12, 15, 20)[c(1, 3, 5, 7, 10, 12, 15, 20) <= max(years)] else years
+fill_pooled <- scale_fill_manual(values = c(`FALSE` = "black", `TRUE` = "white"),
+                                 labels = c(`FALSE` = paste0("Pooled (>= ", P$k_reg_min, " registries)"), `TRUE` = "Pooled, exploratory (2 registries)"),
+                                 name = NULL, drop = FALSE)
+reg_scale <- function(regs) scale_colour_manual(values = registry_colour(sort(unique(regs))), name = "Registry")
+joint_layer <- function(years) {
+  jp <- filter(joint_pred, time_yr <= max(years))
+  list(geom_ribbon(data = jp, aes(x = time_yr, ymin = crr_lcl, ymax = crr_ucl), inherit.aes = FALSE, fill = "grey85", alpha = 0.6),
+       geom_line(data = jp, aes(time_yr, crr), colour = "grey40", linetype = "dashed", inherit.aes = FALSE))
+}
+pooled_layer <- function(pp, size = 3.2) list(
+  geom_errorbar(data = pp, aes(x = time_yr, ymin = crr_lcl, ymax = crr_ucl), inherit.aes = FALSE, width = 0.3),
+  geom_point(data = pp, aes(time_yr, crr, fill = exploratory), shape = 22, size = size, inherit.aes = FALSE))
+label_ends <- function(d, lab) ggrepel::geom_text_repel(
+  data = d |> group_by(.data$grp) |> slice_max(time_yr, n = 1, with_ties = FALSE),
+  aes(label = {{ lab }}, colour = registry), size = 2.5, hjust = 0, direction = "y", nudge_x = 0.5,
+  segment.size = 0.2, show.legend = FALSE, max.overlaps = 40)
+
+obs <- inp |> mutate(variant = label, fixation_group = coalesce(fixation_group, "Unknown"), grp = row_id)
+pooled_all <- filter(pooled, group == ALL)
+
+plot_variants <- function(years, joint = TRUE) {
+  o <- filter(obs, time_yr %in% years); pp <- filter(pooled_all, time_yr %in% years)
+  ggplot(o, aes(time_yr, estimate)) +
+    (if (joint) joint_layer(years)) +
+    geom_line(aes(colour = registry, group = row_id, linetype = fixation_group), linewidth = 0.6) +
+    geom_point(aes(colour = registry, shape = fixation_group), size = 1.6) +
+    pooled_layer(pp) + fill_pooled + reg_scale(o$registry) +
+    scale_linetype_manual(values = c(Cemented = "solid", Cementless = "22", Hybrid = "dotted", Unknown = "dotdash"), name = "Fixation") +
+    scale_shape_manual(values = c(Cemented = 16, Cementless = 17, Hybrid = 15, Unknown = 4), name = "Fixation") +
+    scale_x_continuous(breaks = yr_breaks(years)) +
+    labs(x = "Years since primary", y = "Cumulative revision rate (%)",
+         title = sprintf("%s: published CRR by registry variant (one line per registry row) and pooled CRR", paste(MODELS, collapse = ", ")),
+         subtitle = paste0("Squares = per-year pooled CRR (95% CI), 3-level model.",
+                           if (joint) " Dashed grey = single model across years (95% CI)." else "")) +
+    theme_funnel()
+}
+
+plot_registry <- function(years, m = MODELS[1]) {
+  r <- filter(reg_level, model == m, time_yr %in% years) |> mutate(grp = registry)
+  pp <- filter(pooled, group == if (length(MODELS) == 1) ALL else m, time_yr %in% years)
+  pc <- filter(if (length(MODELS) == 1) collapsed_all else crr_collapsed(filter(inp, model == m), YEARS), time_yr %in% years)
+  ggplot(r, aes(time_yr, crr)) +
+    geom_line(aes(colour = registry, group = registry), linewidth = 0.8) +
+    geom_linerange(aes(ymin = crr_lcl, ymax = crr_ucl, colour = registry), alpha = 0.5) +
+    geom_point(aes(colour = registry, size = n_rows)) +
+    label_ends(r, sprintf("%s (%s row%s at %s y)", registry, n_rows, ifelse(n_rows == 1, "", "s"), time_yr)) +
+    geom_point(data = pc, aes(time_yr, crr), shape = 5, size = 3.4, stroke = 0.9, inherit.aes = FALSE, colour = "grey30") +
+    pooled_layer(pp) + fill_pooled + reg_scale(r$registry) +
+    scale_size(range = c(1.4, 3.4), breaks = 1:5, name = "Rows pooled") +
+    scale_x_continuous(breaks = yr_breaks(years), expand = expansion(mult = c(0.03, 0.15))) +
+    labs(x = "Years since primary", y = "Cumulative revision rate (%)",
+         title = sprintf("%s: one line per registry (registry rows collapsed) and pooled CRR", m),
+         subtitle = paste0("Registry line = that registry's rows weighted by procedures (detail level 1); point size = rows pooled at that year.\n",
+                           "Squares = 3-level pooled CRR (95% CI); open diamonds = pooled CRR of the collapsed registry estimates.")) +
+    theme_funnel()
+}
+
+plot_by_fixation <- function(years) {
+  o <- filter(obs, fixation_group != "Unknown", time_yr %in% years)
+  pp <- filter(pooled, group %in% names(GROUP_COLOURS), time_yr %in% years) |> rename(fixation_group = group)
+  ggplot(o, aes(time_yr, estimate)) +
+    geom_line(aes(colour = registry, group = row_id), linewidth = 0.6) +
+    geom_point(aes(colour = registry), size = 1.4) +
+    label_ends(o, paste0(registry, ": ", variant)) +
+    geom_errorbar(data = pp, aes(x = time_yr, ymin = crr_lcl, ymax = crr_ucl), inherit.aes = FALSE, width = 0.3) +
+    geom_point(data = pp, aes(time_yr, crr, fill = exploratory), shape = 22, size = 2.8, inherit.aes = FALSE, show.legend = FALSE) +
+    fill_pooled + reg_scale(o$registry) +
+    scale_x_continuous(breaks = if (length(years) > 8) c(1, 5, 10, 15, 20) else years, expand = expansion(mult = c(0.02, 0.4))) +
+    facet_wrap(~ fixation_group, nrow = 1) +
+    labs(x = "Years since primary", y = "Cumulative revision rate (%)",
+         title = sprintf("%s by fixation: registry variants and fixation-specific pooled CRR", MODELS[1]),
+         subtitle = "Filled squares = pooled (>= 3 registries); open squares = exploratory (2 registries). SIRIS cemented/hybrid is shown under Cemented.") +
+    theme_funnel()
+}
+
+plot_pooled <- function(years, joint = TRUE) {
+  sub <- filter(pooled, group != ALL, time_yr %in% years); pa <- filter(pooled_all, time_yr %in% years)
+  dodge <- position_dodge(width = if (length(years) > 8) 0.6 else 0.45)
+  ggplot(mapping = aes(time_yr, crr)) +
+    (if (joint) geom_line(data = filter(joint_pred, time_yr <= max(years)), colour = "grey55", linetype = "dashed")) +
+    geom_line(data = sub, aes(colour = group, group = group), position = dodge, alpha = 0.7) +
+    geom_errorbar(data = sub, aes(ymin = crr_lcl, ymax = crr_ucl, colour = group, group = group), width = 0, position = dodge, alpha = 0.6) +
+    geom_point(data = sub, aes(colour = group, group = group, shape = exploratory), position = dodge, size = 2.4) +
+    geom_line(data = pa, colour = "black") +
+    geom_errorbar(data = pa, aes(ymin = crr_lcl, ymax = crr_ucl), width = 0.25) +
+    geom_point(data = pa, aes(fill = exploratory), shape = 22, size = 3.4) +
+    scale_colour_manual(values = if (length(MODELS) == 1) GROUP_COLOURS else scales::hue_pal()(n_distinct(pooled$group) - 1), name = NULL) +
+    scale_shape_manual(values = c(`FALSE` = 16, `TRUE` = 1), labels = c(`FALSE` = "pooled", `TRUE` = "exploratory (2 registries)"), name = NULL, drop = FALSE) +
+    scale_fill_manual(values = c(`FALSE` = "black", `TRUE` = "white"), labels = c(`FALSE` = ALL, `TRUE` = paste(ALL, "(2 registries)")), name = NULL, drop = FALSE) +
+    scale_x_continuous(breaks = sort(unique(pa$time_yr))) +
+    labs(x = "Years since primary", y = "Pooled cumulative revision rate (%)",
+         title = sprintf("Pooled CRR across registries: %s overall and by %s", ALL, if (length(MODELS) == 1) "fixation" else "model"),
+         subtitle = paste0("Black squares = overall pooled CRR (95% CI); coloured = subgroups (dodged).",
+                           if (joint) " Dashed grey = single model across years." else "")) +
+    theme_funnel()
+}
+```
+
+## Registry variants over time (Figure 2 analogue) {#fig2}
+
+Each registry row (variant) is one line, as published. A registry that lists several Oxford variants therefore has several lines.
+
+```{r fig2, fig.height = 7}
+p <- plot_variants(YEARS); p; save_fig(p, "fig2_variants", 11, 7)
+```
+
+```{r fig2-core, fig.height = 6}
+p <- plot_variants(CORE); p; save_fig(p, "fig2_variants_core", 10, 6)
+```
+
+```{r fig2-facet, fig.height = 5}
+if (isTRUE(P$by_fixation) && length(MODELS) == 1) {
+  p <- plot_by_fixation(YEARS); print(p); save_fig(p, "fig2_by_fixation", 13, 5.5)
+  p <- plot_by_fixation(CORE); print(p); save_fig(p, "fig2_by_fixation_core", 13, 5.5)
+}
+```
+
+How to read these figures:
+
+- The **slope** of each line shows how fast that variant accumulates revisions.
+- The **vertical spread** between lines at a given year is the heterogeneity that the pooled estimate summarises.
+- **Registry colours cluster.** SIRIS sits high for both fixations, and the NJR cementless and twin-peg variants sit lowest. That is the registry effect that the meta-regression quantifies. Within-registry splits are also visible, for example NJR single vs twin peg and EPRD TiNbN vs lateral.
+
+## One line per registry: does the model handle several rows per registry? {#per-registry}
+
+The model does handle them. The per-year model is $y_{rj} = \mu + u_r + w_{rj} + \varepsilon_{rj}$:
+
+- **$u_r$, the registry random effect,** is shared by all rows of registry $r$. The model therefore knows that NJR's five Oxford rows come from one registry, and it does not treat them as five independent registries. Its between-registry variance $\sigma^2_{\text{registry}}$ is estimated from five registries, not 17 rows.
+- **$w_{rj}$, the variant random effect,** captures how much the rows *within* a registry differ (single vs twin peg, cemented vs cementless...).
+
+How much weight a registry with many rows gets depends on the two variance components:
+
+- If **variants within a registry were nearly identical** ($\sigma^2_{\text{variant}} \approx 0$), its rows would add almost no information, and the registry would be weighted roughly as one estimate.
+- If **variants genuinely differ** ($\sigma^2_{\text{variant}}$ large, as for Oxford here), each row carries separate information about the brand's variability, so a registry reporting more variants carries more weight.
+
+The table shows each registry's share of the weight under three choices: the nested model used here, treating all rows as independent studies (wrong), and collapsing to one estimate per registry first.
+
+```{r weights}
+w_tab <- purrr::map_dfr(main_years, ~ crr_registry_weights(inp, .x))
+knitr::kable(w_tab |> group_by(registry) |> mutate(Rows = paste(unique(rows), collapse = "/")) |> ungroup() |>
+               mutate(cell = sprintf("%s / %s / %s", f2(w_independent, 0), f2(w_nested, 0), f2(w_collapsed, 0))) |>
+               select(Registry = registry, Rows, time_yr, cell) |>
+               tidyr::pivot_wider(names_from = time_yr, values_from = cell, names_glue = "{time_yr} y"),
+             caption = "Weight share per registry (%): independent rows / nested 3-level model (primary) / collapsed to one estimate per registry. Rows = rows contributing (EPRD has 3 at 10 years).")
+```
+
+How the three weightings compare:
+
+- **Nested vs independent.** For Oxford, the nested weights are close to the "independent" weights, because between-variant variance is as large as or larger than between-registry variance (see [heterogeneity](#het)). NJR and EPRD, with five rows each, carry about 30% of the weight each.
+- **Collapsed.** Here every registry gets about 20%: each collapsed estimate is very precise, so the between-registry variance dominates and the weights become nearly equal.
+
+The two approaches answer slightly different questions, so **both are included**:
+
+- **Variant-level, nested (primary):** "What is the CRR of the Oxford brand across the variants registries use?" It mirrors Combescure et al. It keeps every published CI, and it allows the variant meta-regression (Table 4 analogue).
+- **One line per registry (collapsed):** "What is the CRR of the Oxford brand in a typical registry?" Every country counts equally. This is the meta-analytic version of detail level 1 of the funnels, where each registry has one point per brand. Its registry CIs are too narrow because they ignore the differences between variants. It shows a registry's Oxford as a single number, even when the rows behind it differ (NJR at 5 years: within-registry Q = `r f2(filter(reg_level, model == MODELS[1], registry == "NJR", time_yr == 5)$Q_within, 0)` on `r filter(reg_level, model == MODELS[1], registry == "NJR", time_yr == 5)$n_rows - 1` df).
+
+```{r fig-registry, fig.height = 6.5}
+for (m in MODELS) {
+  sfx <- if (length(MODELS) > 1) paste0("_", tolower(gsub("[^A-Za-z0-9]+", "_", m))) else ""
+  p <- plot_registry(YEARS, m); print(p); save_fig(p, paste0("fig2_registry", sfx), 11, 6.5)
+  p <- plot_registry(CORE, m); print(p); save_fig(p, paste0("fig2_registry_core", sfx), 10, 6)
+}
+```
+
+```{r reg-level-table}
+knitr::kable(reg_level |> filter(time_yr %in% CORE) |> mutate(cell = paste0(fmt_crr(crr, crr_lcl, crr_ucl), " [", n_rows, "]")) |>
+               select(Model = model, Registry = registry, time_yr, cell) |>
+               tidyr::pivot_wider(names_from = time_yr, values_from = cell, names_glue = "{time_yr} y"),
+             caption = "Registry-level Oxford CRR % (95% CI) [rows pooled]; rows weighted by procedures (detail level 1)")
+```
+
+The two pooled estimates in the registry figure differ little: open diamonds (collapsed) vs squares (nested), e.g. `r f2(filter(collapsed_all, time_yr == 5)$crr, 2)`% vs `r f2(pk(5)$crr, 2)`% at 5 years. The collapsed estimate is slightly higher because NJR, with the lowest rates, no longer contributes five rows.
+
+## Pooled CRR over time (Figure 1 analogue) {#fig1}
+
+```{r fig1, fig.height = 5.5}
+p <- plot_pooled(YEARS); p; save_fig(p, "fig1_pooled", 10, 5.5)
+```
+
+```{r fig1-core, fig.height = 5.5}
+p <- plot_pooled(CORE); p; save_fig(p, "fig1_pooled_core", 9, 5.5)
+```
+
+In Combescure et al., Figure 1 shows one coloured line per implant around the black "all implants" squares. With a single brand, the subgroups are the fixation types. When more brands are added (`params$models`), each brand gets its own line and the black squares become the pooled CRR across all of them. The core-years versions (1, 3, 5, 10 years) contain only the years every registry reports, so every point is pooled from the same five registries.
+
+## Pooled CRR by follow-up year (Table 2 analogue) {#table2}
+
+```{r table2}
+t2 <- pooled |>
+  mutate(cell = paste0(fmt_crr(crr, crr_lcl, crr_ucl), ifelse(exploratory, "†", "")),
+         group = factor(group, levels = names(groups))) |>
+  select(group, time_yr, cell) |>
+  tidyr::pivot_wider(names_from = time_yr, values_from = cell, values_fill = "", names_glue = "{time_yr} y") |>
+  arrange(group)
+k_row <- pooled |> group_by(group) |> summarise(`Registries (max)` = max(k_reg), `Procedures` = scales::comma(max(n_total)))
+t2 <- left_join(mutate(t2, group = as.character(group)), k_row, by = "group") |> relocate(`Registries (max)`, Procedures, .after = group)
+knitr::kable(rename(t2, Implant = group),
+             caption = paste("CRR at each follow-up year combined across registries. Pooled CRR % (95% CI).",
+                             "† two registries only: z-based CI, exploratory.",
+                             "Procedures = largest number of procedures contributing at any year."))
+knitr::kable(filter(pooled, group == ALL) |> transmute(Year = time_yr, `Pooled CRR (95% CI)` = fmt_crr(crr, crr_lcl, crr_ucl),
+                                                      `95% prediction interval` = sprintf("%.2f\u2013%.2f", pi_lcl, pi_ucl)),
+             caption = paste("Prediction interval of the", ALL, "CRR: where the CRR of a new registry / variant is expected to fall"))
+readr::write_csv(pooled, file.path(P$table_dir, paste0(SLUG, "_table2_long.csv")))
+readr::write_csv(rename(t2, Implant = group), file.path(P$table_dir, paste0(SLUG, "_table2.csv")))
+```
+
+## Heterogeneity {#het}
+
+```{r het}
+knitr::kable(pooled |> transmute(Group = group, Year = time_yr, k, Registries = k_reg, `Random effects` = structure,
+                                 Q = f2(Q, 1), df = Q_df, `p (Q)` = format.pval(Q_p, digits = 2, eps = 1e-4),
+                                 `I² (%)` = f2(I2_total, 1), `σ² per level` = sigma2_txt, CI = ci_method),
+             caption = "Heterogeneity of the pooled estimates (σ² on the cloglog scale; τ = √σ²)")
+```
+
+Notes on these numbers:
+
+- **I² near 100% is expected.** With registry-sized samples, the sampling variances are tiny, so I² is close to 100% almost however much the registries actually differ (the same point as in the earlier Oxford meta-analysis). The σ² values are the interpretable quantities.
+- **σ² on the CRR scale.** A τ of 0.3 on the cloglog scale means that a registry or variant one SD above the mean has a cumulative hazard about $e^{0.3} \approx 1.35$ times as high.
+- **Registry vs variant variance.** At early follow-up most of the variance is between registries. By 5–10 years, the between-variant component is as large or larger.
+
+## Multivariable models (Table 3 and Table 4 analogues) {#metareg}
+
+Combescure et al. report, for one cup (Table 3, Trident) and one stem (Table 4, Corail), a multivariable meta-regression of the **5-year CRR** on registry country and associated implant. For each factor, the reference is the category with the most implants. The tables give implants (n), adjusted HR (95% CI) and p-values; on the reference row of each factor is the joint (omnibus) p-value for that factor. With one brand, the two tables here use two levels of implant detail for the same Oxford data:
+
+- **Table 3 analogue — registry + fixation.** Fixation is the design factor every registry reports.
+- **Table 4 analogue — registry + design variant.** This is the closest equivalent of the paper's "associated implant". The design variants are: cemented (standard: single peg, or peg design not named), twin peg (NJR), TiNbN-coated (EPRD), cementless, hybrid, lateral (EPRD and NJR) and SIRIS cemented/hybrid. Twin peg and TiNbN are reported by one registry each, so their HRs are within-registry contrasts, made possible by the registry adjustment.
+
+When several brands are analysed, each brand gets its own Table 3 and Table 4, matching the paper's one table per implant.
+
+**Model.** $y_{rj} = \beta_0 + \beta_{\text{registry}(r)} + \beta_{\text{factor}(j)} + w_{rj} + \varepsilon_{rj}$. The model is fitted by REML with a random effect per row and t-based tests. Registry enters as a fixed effect, as in the paper, so the registry random effect is not needed. $\exp(\beta)$ is a hazard ratio. Year: `r P$table34_year` years, as in the paper. The same models at 1, 3 and 10 years follow the two tables.
+
+```{r table34-fit}
+readr::write_csv(t34, file.path(P$table_dir, paste0(SLUG, "_table3_4.csv")))
+fmt_t34 <- function(d) {
+  d |>
+    mutate(`Implants, n` = scales::comma(n),
+           `Adj HR (95% CI)` = ifelse(reference, "1 (ref.)*", sprintf("%s (%s–%s)", f2(HR), f2(HR_lcl), f2(HR_ucl))),
+           `P-value` = ifelse(reference, paste0(format.pval(omnibus_p, digits = 2, eps = 0.001), ifelse(omnibus_p < 0.05, "**", "")),
+                              format.pval(pval, digits = 2, eps = 0.001)),
+           level = paste0("&nbsp;&nbsp;", ifelse(variable == "Fixation", tools::toTitleCase(level), level))) |>
+    group_by(variable) |>
+    group_modify(~ bind_rows(tibble::tibble(level = paste0("**", .y$variable, "**")), .x)) |>
+    ungroup() |>
+    mutate(across(c(`Implants, n`, `Adj HR (95% CI)`, `P-value`), ~ coalesce(.x, ""))) |>
+    select(` ` = level, `Implants, n`, `Adj HR (95% CI)`, `P-value`)
+}
+```
+
+```{r table34, results = "asis"}
+for (m in MODELS) for (tb in unique(t34$table)) {
+  d <- filter(t34, model == m, table == tb, time_yr == P$table34_year) |> mutate(variable = factor(variable, unique(variable)))
+  if (!nrow(d)) next
+  fit_txt <- sprintf("k = %s rows, residual df = %s; residual heterogeneity Q = %s (p %s), residual σ² (row) = %s.",
+                     d$k[1], d$df_resid[1], f2(d$QE[1], 1), format.pval(d$QE_p[1], digits = 2, eps = 1e-4), f2(d$sigma2_resid[1], 3))
+  print(knitr::kable(fmt_t34(d), escape = FALSE, align = "lrrr",
+                     caption = sprintf("%s analogue — multivariable model for the %s-year CRR with %s. * Category with the most implants as reference; the p-value on the reference row is the joint test of that factor. ** p < 0.05. %s",
+                                       sub(":.*", "", tb), P$table34_year, m, fit_txt)))
+  cat("\n\n")
+}
+```
+
+```{r table34-years, results = "asis"}
+for (m in MODELS) for (tb in unique(t34$table)) {
+  d <- filter(t34, model == m, table == tb, !reference)
+  if (!nrow(d)) next
+  w <- d |> mutate(cell = sprintf("%s (%s–%s)%s", f2(HR), f2(HR_lcl), f2(HR_ucl), ifelse(pval < 0.05, "*", ""))) |>
+    select(Factor = variable, Level = level, time_yr, cell) |>
+    tidyr::pivot_wider(names_from = time_yr, values_from = cell, values_fill = "", names_glue = "{time_yr} y")
+  om <- filter(t34, model == m, table == tb, reference) |>
+    transmute(Factor = variable, Level = paste0("joint test (ref: ", level, ")"), time_yr,
+              cell = format.pval(omnibus_p, digits = 2, eps = 0.001)) |>
+    tidyr::pivot_wider(names_from = time_yr, values_from = cell, names_glue = "{time_yr} y")
+  print(knitr::kable(bind_rows(w, om) |> arrange(Factor), caption = sprintf("%s, %s — adjusted HR (95%% CI) at each follow-up year; * p < 0.05; joint-test rows give the p-value of the whole factor.", sub(":.*", "", tb), m)))
+  cat("\n\n")
+}
+```
+
+
+This is how to read the hazard ratios:
+
+- **Registry HRs** compare each registry's Oxford with NJR's Oxford at the same fixation (Table 3) or design variant (Table 4). These differences can't be attributed to the implant: they mix differences in patients, indications, surgeon volume, revision thresholds and the definition of revision. Differences in reporting also contribute: for example, SIRIS counts all diagnoses, while LROI counts osteoarthritis only.
+- **Fixation and design-variant HRs** compare designs within registries.
+- **At `r P$table34_year` years:**
+  - Registry is significant in the fixation model (joint p = `r f2(filter(t3_5, variable == "Registry", reference)$omnibus_p, 3)`) and fixation is not (p = `r f2(filter(t3_5, variable == "Fixation", reference)$omnibus_p, 2)`).
+  - Adding the finer design variants shrinks the registry HRs: SIRIS `r f2(filter(t4_reg, level == "SIRIS")$HR)` vs `r f2(filter(t3_5, level == "SIRIS")$HR)`, and EPRD `r f2(filter(t4_reg, level == "EPRD")$HR)` vs `r f2(filter(t3_5, level == "EPRD")$HR)`. The registry factor as a whole is then no longer significant (p = `r f2(filter(t4_5, variable == "Registry", reference)$omnibus_p, 2)`), nor are the design variants (p = `r f2(filter(t4_5, variable == "Design variant", reference)$omnibus_p, 2)`).
+  - Part of what looked like a registry effect is therefore the mix of variants each registry reports, for example NJR's low-revision twin peg and cementless rows. With 17 rows and `r t4_5$df_resid[1]` residual df, however, the model cannot separate the two cleanly.
+- **Point estimates for the variants** (none significant): TiNbN-coated `r f2(filter(t4_dv, grepl("TiNbN", level))$HR)`, twin peg `r f2(filter(t4_dv, grepl("Twin", level))$HR)`, cementless `r f2(filter(t4_dv, level == "Cementless")$HR)` and lateral `r f2(filter(t4_dv, level == "Lateral")$HR)`, each relative to standard cemented.
+
+The earlier summary of the fixation model across years (omnibus tests) is kept below.
+
+```{r metareg, results = "asis"}
+if (nrow(metareg)) {
+  print(knitr::kable(metareg |> distinct(time_yr, k, QM_p, fixation_p, registry_p, QE, QE_p, sigma2_resid) |>
+                 transmute(Year = time_yr, k, `All moderators p` = format.pval(QM_p, digits = 2),
+                           `Fixation (joint) p` = format.pval(fixation_p, digits = 2),
+                           `Registry (joint) p` = format.pval(registry_p, digits = 2, eps = 1e-4),
+                           `Residual Q` = f2(QE, 1), `Residual p` = format.pval(QE_p, digits = 2, eps = 1e-4),
+                           `Residual σ² (variant)` = f2(sigma2_resid, 3)),
+               caption = "Fixation + registry model (Table 3 analogue) at each year: joint tests and residual heterogeneity"))
+}
+```
+
+## Forest plots by follow-up year {#forest}
+
+```{r forest, fig.height = 8}
+fy <- intersect(unlist(P$forest_years), main_years)
+fp_rows <- filter(inp, time_yr %in% fy) |> mutate(lab = paste0(registry, ": ", label))
+fp_pool <- filter(pooled, group == ALL, time_yr %in% fy) |> mutate(lab = paste0("Pooled ", ALL))
+lev <- c(rev(sort(unique(fp_rows$lab))), unique(fp_pool$lab))
+pf <- ggplot() +
+  geom_vline(data = fp_pool, aes(xintercept = crr), linetype = "dashed", colour = "grey50") +
+  geom_errorbarh(data = fp_rows, aes(y = factor(lab, lev), xmin = lcl, xmax = ucl, colour = registry), height = 0) +
+  geom_point(data = fp_rows, aes(y = factor(lab, lev), x = estimate, colour = registry, size = n_total), shape = 15) +
+  geom_errorbarh(data = fp_pool, aes(y = factor(lab, lev), xmin = crr_lcl, xmax = crr_ucl), height = 0, linewidth = 0.9) +
+  geom_point(data = fp_pool, aes(y = factor(lab, lev), x = crr), shape = 18, size = 4.5) +
+  scale_colour_manual(values = registry_colour(sort(unique(fp_rows$registry))), guide = "none") +
+  scale_size_area(max_size = 3.5, guide = "none") +
+  facet_wrap(~ factor(paste(time_yr, "years"), levels = paste(sort(fy), "years")), nrow = 1, scales = "free_x") +
+  labs(x = "Cumulative revision rate (%)", y = NULL, title = sprintf("%s: variant CRRs and pooled CRR by follow-up year", paste(MODELS, collapse = ", ")),
+       subtitle = "Squares sized by procedures; diamond = pooled CRR (95% CI, t / containment df)") +
+  theme_funnel()
+pf
+save_fig(pf, "forest", 13, 8)
+```
+
+## Sensitivity analyses {#sens}
+
+```{r sens, results = "asis"}
+sens <- bind_rows(
+  transmute(filter(pooled, group == ALL, time_yr %in% main_years), Analysis = "Primary: 3-level REML, t / containment df", time_yr, crr, crr_lcl, crr_ucl),
+  transmute(filter(pooled_z, time_yr %in% main_years), Analysis = "z CI (as Combescure et al.)", time_yr, crr, crr_lcl, crr_ucl),
+  transmute(no_lat, Analysis = "Lateral variants excluded", time_yr, crr, crr_lcl, crr_ucl),
+  transmute(collapsed, Analysis = "One estimate per registry (rows weighted by procedures), 2-level REML, Knapp-Hartung", time_yr, crr, crr_lcl, crr_ucl),
+  transmute(filter(joint_at, time_yr %in% main_years), Analysis = "Single model across all years", time_yr, crr, crr_lcl, crr_ucl))
+print(knitr::kable(sens |> mutate(cell = fmt_crr(crr, crr_lcl, crr_ucl)) |> select(Analysis, time_yr, cell) |>
+               tidyr::pivot_wider(names_from = time_yr, values_from = cell, names_glue = "{time_yr} y"),
+             caption = "Pooled CRR % (95% CI) under alternative analyses"))
+print(knitr::kable(loro |> mutate(cell = fmt_crr(crr, crr_lcl, crr_ucl)) |> select(`Registry left out` = left_out, time_yr, cell) |>
+               tidyr::pivot_wider(names_from = time_yr, values_from = cell, names_glue = "{time_yr} y"),
+             caption = "Leave-one-registry-out pooled CRR % (95% CI)"))
+```
+
+What the sensitivity analyses show:
+
+```{r sens-numbers, include = FALSE}
+w <- function(d) d$crr_ucl - d$crr_lcl
+zt_ratio <- mean(w(filter(pooled_z, time_yr %in% main_years)) / w(filter(pooled, group == ALL, time_yr %in% main_years)))
+c5 <- filter(collapsed, time_yr == 5); p5 <- pk(5)
+loro_shift <- loro |> left_join(select(all_p, time_yr, crr0 = crr), by = "time_yr") |> group_by(left_out) |>
+  summarise(max_shift = max(abs(crr - crr0)), .groups = "drop") |> arrange(desc(max_shift))
+```
+
+- **z vs t.** On average, the z intervals are `r f2(100 * zt_ratio, 0)`% as wide as the t / containment-df intervals. This is how much the paper's z intervals would overstate precision with five registries.
+- **Collapsed vs nested.** Collapsing to one estimate per registry gives a 5-year CRR of `r f2(c5$crr, 2)`% (`r f2(c5$crr_lcl, 2)`–`r f2(c5$crr_ucl, 2)`), compared with `r f2(p5$crr, 2)`% (`r f2(p5$crr_lcl, 2)`–`r f2(p5$crr_ucl, 2)`) in the primary analysis. The collapsed estimate is higher because the NJR's large, low-revision variants then count as one estimate. Its CI is narrower because within-registry variant heterogeneity is ignored.
+- **Leave-one-registry-out.** The largest shift in the pooled CRR at any of 1–10 years comes from leaving out `r loro_shift$left_out[1]` (`r f2(loro_shift$max_shift[1], 2)` percentage points). The next largest is `r loro_shift$left_out[2]` (`r f2(loro_shift$max_shift[2], 2)` percentage points).
+
+### Single model across follow-up years
+
+```{r joint, results = "asis"}
+jf <- jm$fit
+cf <- coef(summary(jf))
+print(knitr::kable(tibble::tibble(Term = c("Intercept", "log t", "(log t)²"), Estimate = f2(cf$estimate, 3),
+                            `95% CI` = paste(f2(cf$ci.lb, 3), "–", f2(cf$ci.ub, 3)), p = format.pval(cf$pval, digits = 2)),
+             caption = sprintf("Fixed effects of the joint model (k = %s estimates from %s variants; random %s per registry and variant)",
+                               jf$k, n_distinct(jm$data$row_id), if (jm$slopes) "intercepts and log t slopes" else "intercepts")))
+cmp <- inner_join(select(all_p, time_yr, per_year = crr, k_reg), select(joint_at, time_yr, joint = crr, joint_lcl = crr_lcl, joint_ucl = crr_ucl), by = "time_yr")
+print(knitr::kable(cmp |> transmute(Year = time_yr, Registries = k_reg, `Per-year pooled CRR` = f2(per_year), `Joint model CRR (95% CI)` = fmt_crr(joint, joint_lcl, joint_ucl),
+                              Difference = f2(per_year - joint)),
+             caption = "Per-year pooled vs joint-model CRR"))
+```
+
+What the joint model shows:
+
+- **Shape of the curve.** The log t slope is below 1 and the quadratic term is small. On the cloglog scale, that means the cumulative hazard rises less than proportionally with time: revision risk is highest in the first years and then flattens, as expected for UKA.
+- **Agreement with the per-year estimates.** The joint model agrees closely with the per-year estimates at 1–10 years and gives a smooth, monotone curve beyond 10 years.
+- **Exploratory late years.** At 15 and 20 years, the per-year "pooled" values come from AOANJRR and NJR only. The joint model also borrows strength from the shape of the other registries' curves.
+
+# Limitations {#limitations}
+
+1. **The metrics are not the same.** All five registries report 1 − KM, but they differ in:
+   - **population:** LROI counts osteoarthritis only; SIRIS and EPRD count all diagnoses; AOANJRR covers modern prostheses;
+   - **revision definition and time window:** for example, SIRIS starts in 2012, while AOANJRR starts in 1999;
+   - **censoring for death:** KM overestimates cumulative revision when mortality is high. This matters more at 15–20 years, when competing risk of death is substantial.
+
+   Some of the registry effect is definitional.
+2. **SEs come from published CIs.** They assume the CI is symmetric on the cloglog scale; [the check above](#methods) shows this holds closely for AOANJRR, NJR and SIRIS, and approximately for EPRD and LROI. Rounding of published CIs (one decimal place in AOANJRR, EPRD and SIRIS) adds error at very small CRRs (1 year).
+3. **Implant identification is limited to report labels.** Brand-level grouping mixes variants: peg design, TiNbN coating, lateral fixed bearing, and hybrid fixation. Variant heterogeneity is part of what is being estimated. NJR fixation depends on a *design* rule for the tibia, and SIRIS does not split cemented from hybrid.
+4. **No case-mix adjustment.** The reports do not give model-level CRRs by age and sex. The random effects absorb, but do not explain, differences in patient mix between registries and between variants, so registry and fixation HRs are not causal.
+5. **Few registries.** With 5 registries, the registry variance and the CIs are imprecise even with t / containment df. At years reported by only two registries (7, 15 and 20), the estimates are exploratory.
+6. **Per-year analyses reuse the same patients.** They multiply tests (1, 3, 5, 10 years and the subgroups). The joint model addresses this only approximately: the within-row covariance uses an independent-increments approximation, and the quadratic-in-log-t shape is an assumption.
+7. **Different follow-up periods.** At long follow-up, a registry's estimate reflects implants put in early, while its short-term estimates are dominated by recent ones. Changes over calendar time (e.g. NJR's shift to twin peg) are therefore mixed into the follow-up curve. The report tables give no CRR by implantation period at model level, except the LROI all-UKA K052B.
+8. **Low numbers at risk late in follow-up.** These widen the CIs and make KM estimates unstable. The registries' own suppression thresholds are relied on.
+
+# Expanding to other models
+
+To run this for other or several brands, set `params$models`:
+
+```r
+rmarkdown::render("crr_meta_analysis.Rmd", params = list(models = c("Oxford", "ZUK / Physica ZUK", "Journey")))
+```
+
+With several models:
+
+- **Groups.** Each brand becomes a group, and the overall estimate pools all of them (random effects: model / registry within model / variant). This gives the full Figure 1 and Table 2 layout of the paper.
+- **Fixation.** Fixation subgroups become model × fixation groups. Set `by_fixation = FALSE` to keep the table compact.
+- **Which brands to add.** Brands reported by at least three registries with CIs are the useful ones. The [data table](#data) of each run shows how many registries contribute.
+
+# Reference
+
+Combescure C, Smith JA, Barea C, Hoogervorst LA, Nelissen R, Marang-van de Mheen PJ, Lübbeke A, and the Arthroplasty registry group. Cumulative risk of revision after primary total hip arthroplasty in registries internationally: systematic review and meta-analysis of selected hip stems and cups. *EFORT Open Reviews* 2025;10:277–285. doi:10.1530/EOR-2024-0020.
