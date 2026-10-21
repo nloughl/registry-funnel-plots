@@ -6,8 +6,9 @@
 #   subtraction  remove model i's procedures from the PUBLISHED registry total:
 #                p_(-i) = (N p_pub - n_i p_i) / (N - n_i)
 #                patient-weighted (same estimand as the published mean), keeps unlisted "other" models
-#   meta-analytic  random-effects meta-analysis of the model rates (metafor::rma, logit scale, SE from
-#                each model's published Kaplan-Meier CI), then metafor::leave1out() / influence()
+#   meta-analytic  random-effects meta-analysis of the model rates (metafor::rma on the complementary log-log
+#                scale by default, or logit; SE from each model's published Kaplan-Meier CI), then
+#                metafor::leave1out() / influence(); every rate is back-transformed to the proportion scale
 #                model-weighted (the expected rate of a typical MODEL, not of a typical patient)
 #
 # Reference options per model (all evaluated with the same control limits):
@@ -27,10 +28,28 @@ LOO_REF_COLOURS <- c(pub = "#222222", loo_sub = "#1B9E77", re = "#2166AC", loo_r
                      min_loo_re = "#E7298A")
 LOO_STATUS_COLOURS <- c(above = "#B2182B", within = "#9E9E9E", below = "#2166AC")
 
-#' Model rows for one joint at time_yr, with logit estimates and variances.
-#' AOANJRR elbow stems (printed per diagnosis) are pooled per stem: n-weighted rate, SE combined from
-#' the per-diagnosis CIs (proportion scale) and moved to the logit scale with the delta method.
-loo_models <- function(ext, cfg, time_yr, z = stats::qnorm(0.975)) {
+# Transformation of the revision proportion p used for the meta-analysis --------------------------------
+#   cloglog  log(-log(1 - p)) = log(-log S): the scale registries build Kaplan-Meier CIs on (Kalbfleisch &
+#            Prentice; the published CIs are symmetric on it) and the log cumulative hazard; used for pooled
+#            UKA survival by Heaps et al. 2019 (J Arthroplasty, metafor + REML). Default.
+#   logit    log(p / (1 - p)): metafor's standard for proportions (measure "PLO"); sensitivity analysis.
+# f = transform, inv = back-transform to p, dfdp = derivative (delta method).
+MA_SCALES <- list(
+  cloglog = list(label = "complementary log-log", f = function(p) log(-log(1 - p)),
+                 inv = function(x) 1 - exp(-exp(x)), dfdp = function(p) 1 / (-(1 - p) * log(1 - p))),
+  logit   = list(label = "logit", f = stats::qlogis, inv = stats::plogis, dfdp = function(p) 1 / (p * (1 - p))))
+ma_scale <- function(scale) {
+  if (!scale %in% names(MA_SCALES)) stop("scale must be one of: ", paste(names(MA_SCALES), collapse = ", "))
+  MA_SCALES[[scale]]
+}
+
+#' Model rows for one joint at time_yr, with estimates and variances on the chosen scale.
+#' SE_i = [f(ucl_i) - f(lcl_i)] / (2 * 1.96), from the published Kaplan-Meier 95% CI.
+#' AOANJRR elbow stems (printed per diagnosis) are pooled per stem: n-weighted rate; each row's SE is taken
+#' from its own CI on the chosen scale, moved to the proportion scale (delta method), combined n-weighted,
+#' and moved back to the chosen scale at the pooled rate.
+loo_models <- function(ext, cfg, time_yr, z = stats::qnorm(0.975), scale = "cloglog") {
+  sc <- ma_scale(scale)
   m <- rare_means(ext, cfg, time_yr)
   if (!nrow(m)) return(NULL)
   d <- rare_points(ext, m, cfg, time_yr, elbow_by_diagnosis = TRUE) |>
@@ -39,28 +58,29 @@ loo_models <- function(ext, cfg, time_yr, z = stats::qnorm(0.975)) {
   single <- d[!by_dx, ] |>
     dplyr::mutate(
       ok = !is.na(lcl) & !is.na(ucl) & lcl > 0 & ucl < 1 & p > 0 & p < 1,
-      yi = ifelse(ok, stats::qlogis(p), NA_real_),
-      sei = ifelse(ok, (stats::qlogis(ucl) - stats::qlogis(lcl)) / (2 * z), NA_real_),
-      se_source = ifelse(ok, "published CI (logit scale)", NA_character_),
+      yi = ifelse(ok, sc$f(p), NA_real_),
+      sei = ifelse(ok, (sc$f(ucl) - sc$f(lcl)) / (2 * z), NA_real_),
+      se_source = ifelse(ok, paste0("published CI (", sc$label, " scale)"), NA_character_),
       model = family, n_rows = 1L)
   pooled <- d[by_dx, ] |>
-    dplyr::mutate(se_p = (ucl - lcl) / (2 * z)) |>
+    dplyr::mutate(se_p = ((sc$f(ucl) - sc$f(lcl)) / (2 * z)) / sc$dfdp(p)) |>   # row SE, proportion scale
     dplyr::group_by(registry, family) |>
     dplyr::summarise(p = sum(p * n_total) / sum(n_total),
                      se_p = sqrt(sum((n_total / sum(n_total))^2 * se_p^2)),
                      n_total = sum(n_total), n_rows = dplyr::n(),
                      diagnosis = paste(unique(diagnosis), collapse = " + "), .groups = "drop") |>
     dplyr::mutate(lcl = NA_real_, ucl = NA_real_, ok = p > 0 & p < 1,
-                  yi = stats::qlogis(p), sei = se_p / (p * (1 - p)),
-                  se_source = "pooled across diagnoses (delta method)", model = family) |>
+                  yi = sc$f(p), sei = se_p * sc$dfdp(p),
+                  se_source = paste0("pooled across diagnoses (delta method, ", sc$label, ")"), model = family) |>
     dplyr::select(-se_p)
   out <- dplyr::bind_rows(single, pooled)
-  # fallback (no usable CI, or a 0% estimate): events = p * n, logit with 0.5 continuity correction
+  # fallback (no usable CI, or a 0% estimate): events = p * n, 0.5 continuity correction, binomial SE (delta)
   fb <- is.na(out$yi) | is.na(out$sei)
   if (any(fb)) {
     e <- out$p[fb] * out$n_total[fb]; nn <- out$n_total[fb]
-    out$yi[fb]  <- log((e + 0.5) / (nn - e + 0.5))
-    out$sei[fb] <- sqrt(1 / (e + 0.5) + 1 / (nn - e + 0.5))
+    pc <- (e + 0.5) / (nn + 1)
+    out$yi[fb]  <- sc$f(pc)
+    out$sei[fb] <- sqrt(pc * (1 - pc) / nn) * sc$dfdp(pc)
     out$se_source[fb] <- "binomial approximation (0.5 correction)"
   }
   # duplicate model names within a registry (e.g. two Infinity talar combinations): keep the row label
@@ -69,20 +89,21 @@ loo_models <- function(ext, cfg, time_yr, z = stats::qnorm(0.975)) {
     dplyr::mutate(model = if (dplyr::n() > 1) label else model) |>
     dplyr::ungroup() |>
     dplyr::mutate(model = ifelse(n_rows > 1, paste0(model, " [", n_rows, " dx]"), model),
-                  vi = sei^2, joint = ext$joint, time_yr = time_yr) |>
-    dplyr::select(joint, time_yr, registry, model, n_total, p, lcl, ucl, yi, vi, sei, se_source,
+                  vi = sei^2, joint = ext$joint, time_yr = time_yr, scale = scale) |>
+    dplyr::select(joint, time_yr, registry, model, n_total, p, lcl, ucl, yi, vi, sei, se_source, scale,
                   n_rows, diagnosis, low_at_risk)
   list(models = out, means = m)
 }
 
 #' Meta-analysis and leave-one-out for one registry (k >= 3 models).
 #' REML random effects with the Knapp-Hartung adjustment; a common-effect (inverse-variance) fit for comparison.
-loo_fit <- function(md, N, p_pub, test = "knha") {
+loo_fit <- function(md, N, p_pub, test = "knha", scale = "cloglog") {
+  inv <- ma_scale(scale)$inv
   md <- dplyr::arrange(md, dplyr::desc(n_total))
   k <- nrow(md)
   re <- metafor::rma(yi, vi, data = md, slab = model, method = "REML", test = test)   # slab: model names for metafor's own plots
   ce <- metafor::rma(yi, vi, data = md, method = "EE")
-  l1 <- as.data.frame(metafor::leave1out(re, transf = stats::plogis))
+  l1 <- as.data.frame(metafor::leave1out(re, transf = inv))                     # back to the proportion scale
   inf <- stats::influence(re)   # S3 method influence.rma.uni from metafor
   infd <- as.data.frame(inf$inf)
   w_re <- stats::weights(re) / 100; w_ce <- stats::weights(ce) / 100
@@ -95,17 +116,18 @@ loo_fit <- function(md, N, p_pub, test = "knha") {
       d_sub = loo_sub - p_pub,
       # meta-analytic leave-one-out (back-transformed)
       loo_re = l1$estimate, loo_re_lb = l1$ci.lb, loo_re_ub = l1$ci.ub,
-      d_re = loo_re - stats::plogis(re$b[1]),
+      d_re = loo_re - inv(re$b[1]),
       tau2_without = l1$tau2, I2_without = l1$I2,
       rstudent = infd$rstudent, dffits = infd$dffits, cook_d = infd$cook.d,
       cov_r = infd$cov.r, hat = infd$hat, tau2_del = infd$tau2.del,
       influential = as.character(infd$inf) %in% "*")
   summ <- tibble::tibble(
     k = k, N = N, p_pub = p_pub,
-    p_re = stats::plogis(re$b[1]), p_re_lb = stats::plogis(re$ci.lb), p_re_ub = stats::plogis(re$ci.ub),
-    p_ce = stats::plogis(ce$b[1]),
+    scale = scale,
+    p_re = inv(re$b[1]), p_re_lb = inv(re$ci.lb), p_re_ub = inv(re$ci.ub),
+    p_ce = inv(ce$b[1]),
     tau2 = re$tau2, I2 = re$I2, QE = re$QE, QEp = re$QEp,
-    pi_lb = stats::plogis(stats::predict(re)$pi.lb), pi_ub = stats::plogis(stats::predict(re)$pi.ub),
+    pi_lb = inv(stats::predict(re)$pi.lb), pi_ub = inv(stats::predict(re)$pi.ub),
     loo_sub_min = min(models$loo_sub), loo_sub_max = max(models$loo_sub),
     loo_re_min = min(models$loo_re), loo_re_max = max(models$loo_re),
     drop_for_min = models$model[which.min(models$loo_sub)],
@@ -116,16 +138,16 @@ loo_fit <- function(md, N, p_pub, test = "knha") {
 }
 
 #' Run loo_models() + loo_fit() for every registry with >= k_min models.
-loo_run <- function(ext, cfg, time_yr, k_min = 3, test = "knha") {
-  lm <- loo_models(ext, cfg, time_yr)
+loo_run <- function(ext, cfg, time_yr, k_min = 3, test = "knha", scale = "cloglog") {
+  lm <- loo_models(ext, cfg, time_yr, scale = scale)
   if (is.null(lm)) return(NULL)
   regs <- lm$models |> dplyr::count(registry) |> dplyr::filter(n >= k_min) |> dplyr::pull(registry)
   fits <- purrr::map(stats::setNames(regs, regs), function(r) {
     mm <- dplyr::filter(lm$means, registry == r)
-    loo_fit(dplyr::filter(lm$models, registry == r), mm$n_total, mm$p_mean, test)
+    loo_fit(dplyr::filter(lm$models, registry == r), mm$n_total, mm$p_mean, test, scale)
   })
   list(
-    joint = ext$joint, time_yr = time_yr, fits = fits, means = lm$means,
+    joint = ext$joint, time_yr = time_yr, scale = scale, fits = fits, means = lm$means,
     skipped = setdiff(unique(c(lm$means$registry, lm$models$registry)), regs),
     models = purrr::imap_dfr(fits, function(f, r) dplyr::mutate(f$models, registry = r)),
     summary = purrr::imap_dfr(fits, function(f, r) dplyr::mutate(f$summary, registry = r, .before = 1)) |>
@@ -184,17 +206,52 @@ limit_calibration <- function(p0, n, level = 0.998) {
   })
 }
 
+#' Sensitivity of the meta-analysis to the transformation scale.
+#' Fits every joint x follow-up year on each scale and returns one row per joint, year, registry and scale:
+#' pooled mean (CI), prediction interval, tau2, I2, the lowest leave-one-out mean and the model left out,
+#' and the models flagged against the lowest leave-one-out mean (funnel limit `method` at `level`).
+loo_scale_compare <- function(exts, cfg, years, scales = c("cloglog", "logit"), k_min = 3, test = "knha",
+                              level = 0.90, method = "normal") {
+  grid <- tidyr::expand_grid(j = names(exts), t = years, sc = scales)
+  purrr::pmap_dfr(grid, function(j, t, sc) {
+    r <- loo_run(exts[[j]], cfg, t, k_min = k_min, test = test, scale = sc)
+    if (is.null(r) || !nrow(r$summary)) return(NULL)
+    fl <- loo_status(r, level, method) |>
+      dplyr::filter(ref == "min_loo_re", status != "within") |>
+      dplyr::group_by(registry) |>
+      dplyr::summarise(n_flag = dplyr::n(), flagged = paste(sort(paste0(model, " (", status, ")")), collapse = "; "),
+                       .groups = "drop")
+    r$summary |>
+      dplyr::select(joint, time_yr, registry, scale, k, p_re, p_re_lb, p_re_ub, pi_lb, pi_ub, tau2, I2,
+                    loo_re_min, drop_for_min_re) |>
+      dplyr::left_join(fl, by = "registry") |>
+      dplyr::mutate(n_flag = dplyr::coalesce(n_flag, 0L), flagged = dplyr::coalesce(flagged, ""))
+  })
+}
+
+#' One row per joint, year and registry: the two scales side by side, with differences in percentage points
+#' and whether the lowest-LOO model and the flagged models agree.
+loo_scale_wide <- function(cmp, a = "cloglog", b = "logit") {
+  x <- dplyr::filter(cmp, scale == a); y <- dplyr::filter(cmp, scale == b)
+  dplyr::inner_join(x, y, by = c("joint", "time_yr", "registry", "k"), suffix = c("_a", "_b")) |>
+    dplyr::mutate(d_re_pp = 100 * (p_re_a - p_re_b),
+                  d_loo_pp = 100 * (loo_re_min_a - loo_re_min_b),
+                  same_drop = drop_for_min_re_a == drop_for_min_re_b,
+                  same_flags = flagged_a == flagged_b)
+}
+
 # plots -------------------------------------------------------------------------------------------
 
 #' Forest plot: model rates (published CI) with the published mean (black) and the random-effects mean
 #' (blue band = its CI, dotted = prediction interval). Point size ~ n.
 plot_loo_forest <- function(run, ...) {
+  inv <- ma_scale(if (is.null(run$scale)) "cloglog" else run$scale)$inv
   md <- run$models |>
     dplyr::group_by(registry) |>
     dplyr::mutate(model = factor(model, levels = rev(model[order(-n_total)]))) |>
     dplyr::ungroup() |>
-    dplyr::mutate(lo = dplyr::coalesce(lcl, stats::plogis(yi - 1.96 * sei)),
-                  hi = dplyr::coalesce(ucl, stats::plogis(yi + 1.96 * sei)))
+    dplyr::mutate(lo = dplyr::coalesce(lcl, inv(yi - 1.96 * sei)),
+                  hi = dplyr::coalesce(ucl, inv(yi + 1.96 * sei)))
   s <- run$summary
   ggplot2::ggplot(md, ggplot2::aes(y = model)) +
     ggplot2::geom_rect(data = s, ggplot2::aes(xmin = p_re_lb, xmax = p_re_ub, ymin = -Inf, ymax = Inf),

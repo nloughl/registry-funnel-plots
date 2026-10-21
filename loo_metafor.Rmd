@@ -13,6 +13,8 @@ params:
   time_yr: 3                     # follow-up year analysed
   time_yrs: [1, 3, 5]            # follow-up years in the summary table
   ma_test: "knha"                # CI of the random-effects mean: "knha" (Knapp-Hartung) or "z"
+  ma_scale: "cloglog"            # meta-analysis scale: "cloglog" (complementary log-log, primary) or "logit"
+  scale_compare: true            # add the cloglog vs logit sensitivity section
   k_min: 3                       # minimum number of models for a meta-analysis
   summary_level: 0.90            # control limit used in the final summary
   summary_method: "normal"       # limits used in the final summary: "normal" (Wald) or "exact"
@@ -35,6 +37,9 @@ JOINT_NAME <- c(ANKLE = "Total ankle", ELBOW = "Total elbow")
 METHOD_NAME <- c(normal = "Wald (normal approximation)", exact = "exact binomial")
 save_fig <- function(p, slug, width = 11, height = 6) if (isTRUE(P$save_png))
   save_plot(p, paste0("metafor_", slug), P$out_dir, width = width, height = height)
+SC <- ma_scale(P$ma_scale)
+SCN <- P$ma_scale                                   # short name for column labels
+SC_OTHER <- setdiff(names(MA_SCALES), P$ma_scale)[1]
 src <- function(txt) cat("\n\n<p style='font-size:90%;color:#555'><b>Source:</b> ", txt, "</p>\n\n", sep = "")
 ```
 
@@ -64,6 +69,7 @@ It is a focused version of `loo_influence.Rmd`, limited to the metafor (random-e
 | Standardised residual plot | [Standardised residuals](#rstudent) | **metafor**: `influence()` (`rstudent`), drawn with ggplot2 |
 | Wald vs exact limits (calibration table, plot, status table) | [Control limits](#limits) | Not metafor: binomial calculations in `R/limits.R` |
 | 90% and 95% funnels, power table, counts | [90% and 95% limits](#screening) | Funnels are not metafor. Their second reference (lowest leave-one-out mean) **comes from metafor** `leave1out()` |
+| Scale sensitivity table (cloglog vs logit) | [Sensitivity](#scale-sensitivity) | **metafor**: `rma()`, `leave1out()` refitted on each scale |
 | Summary tables | [Summary](#summary) | metafor `influence()` and `leave1out()`, plus funnel limits from `R/limits.R` |
 
 # Data and model inputs {#data}
@@ -71,7 +77,7 @@ It is a focused version of `loo_influence.Rmd`, limited to the metafor (random-e
 ```{r load}
 cfg <- load_rare_config(".")
 exts <- purrr::compact(purrr::map(stats::setNames(unlist(P$joints), unlist(P$joints)), ~ load_rare(P$data_dir, .x)))
-runs <- purrr::compact(purrr::map(exts, ~ loo_run(.x, cfg, T_YR, k_min = P$k_min, test = P$ma_test)))
+runs <- purrr::compact(purrr::map(exts, ~ loo_run(.x, cfg, T_YR, k_min = P$k_min, test = P$ma_test, scale = P$ma_scale)))
 skipped <- purrr::imap_chr(runs, ~ paste(.x$skipped, collapse = ", "))
 ```
 
@@ -79,21 +85,30 @@ skipped <- purrr::imap_chr(runs, ~ paste(.x$skipped, collapse = ", "))
 
 **Input to the meta-analysis.** For each model $i$, the meta-analysis needs an estimate and its variance:
 
-* The estimate is the logit of the published Kaplan-Meier cumulative revision rate, $y_i = \text{logit}(p_i)$.
-* The standard error comes from the published 95% CI on the same scale, $SE_i = [\text{logit}(ucl_i) - \text{logit}(lcl_i)] / (2 \times 1.96)$, and $v_i = SE_i^2$.
+* The estimate is the published Kaplan-Meier cumulative revision rate $p_i$ on a transformed scale, $y_i = f(p_i)$. This report uses the **`r SC$label`** scale (parameter `ma_scale`).
+* The standard error comes from the published 95% CI on the same scale, $SE_i = [f(ucl_i) - f(lcl_i)] / (2 \times 1.96)$, and $v_i = SE_i^2$.
+* Every pooled result (means, CIs, prediction intervals, leave-one-out means) is **back-transformed** to the proportion scale with $f^{-1}$ before it is shown.
 
-Using the published CI rather than a binomial variance from $n$ means the variance allows for censoring and the number still at risk. The logit scale keeps pooled rates between 0 and 1 and suits the asymmetric KM CIs.
+| Scale | $f(p)$ | Back-transform $f^{-1}(y)$ | Delta-method factor $f'(p)$ |
+|---|---|---|---|
+| Complementary log-log (primary) | $\log(-\log(1 - p)) = \log(-\log S)$ | $1 - \exp(-\exp(y))$ | $1 / [-(1-p)\log(1-p)]$ |
+| Logit (sensitivity) | $\log(p / (1 - p))$ | $1 / (1 + e^{-y})$ | $1 / [p(1-p)]$ |
 
-AOANJRR elbow stems are printed separately for fracture, OA and RA. Each stem is pooled into one row: the rate is n-weighted, the SE is combined from the per-diagnosis CIs, and it is converted to the logit scale with the delta method.
+**Why the complementary log-log scale.** Registries compute Kaplan-Meier CIs on the log(−log) scale of survival (Kalbfleisch & Prentice 2002; the default in SAS and the approach recommended by the International Prosthesis Benchmarking Working Group 2018). For the published CIs used here, the upper and lower half-widths are symmetric on that scale (median ratio ≈ 1.00), so the SE read back from the CI is the one the registry computed. On another scale the CI is slightly asymmetric and the SE is an approximation. The cloglog scale is also the scale of a proportional-hazards contrast between survival curves, and it was used for pooling arthroplasty survival estimates with REML in `metafor` by Heaps et al. (2019). The logit scale is the usual choice for pooling simple proportions (Lin & Chu 2020; e.g. Greco et al. 2026). When event probabilities are low, as for most revision rates here, the two scales give almost the same answers (Salika et al. 2022), which the [sensitivity analysis](#scale-sensitivity) checks.
+
+Using the published CI rather than a binomial variance from $n$ means the variance allows for censoring and the number still at risk. Both scales keep pooled rates between 0 and 1.
+
+AOANJRR elbow stems are printed separately for fracture, OA and RA. Each stem is pooled into one row: the rate is n-weighted, the SE is combined from the per-diagnosis CIs on the proportion scale, and it is moved to the analysis scale with the delta method, $SE_y = SE_p \times f'(p)$.
 
 ```{r inputs}
 purrr::map_dfr(runs, "models") |>
   arrange(joint, registry, desc(n_total)) |>
   transmute(joint = JOINT_NAME[joint], registry, model, n = scales::comma(n_total),
             `share of registry n` = pct(share_n), rate = pct(p),
-            `95% CI` = ifelse(is.na(lcl), sprintf("%s-%s", pct(plogis(yi - 1.96 * sei)), pct(plogis(yi + 1.96 * sei))),
+            `95% CI` = ifelse(is.na(lcl), sprintf("%s-%s", pct(SC$inv(yi - 1.96 * sei)), pct(SC$inv(yi + 1.96 * sei))),
                               sprintf("%s-%s", pct(lcl), pct(ucl))),
-            `y (logit)` = num(yi, 3), `SE (logit)` = num(sei, 3), `SE source` = se_source) |>
+            y = num(yi, 3), SE = num(sei, 3), `SE source` = se_source) |>
+  rename(!!paste0("y (", SCN, ")") := y, !!paste0("SE (", SCN, ")") := SE) |>
   knitr::kable(caption = paste0("Model inputs at ", T_YR, " years"))
 ```
 
@@ -103,7 +118,7 @@ purrr::map_dfr(runs, "models") |>
 
 $$y_i = \mu + u_i + e_i, \qquad u_i \sim N(0, \tau^2), \quad e_i \sim N(0, v_i)$$
 
-* $\mu$ is the pooled logit rate. Back-transformed, it is the expected revision rate of a typical **model**.
+* $\mu$ is the pooled rate on the `r SC$label` scale. Back-transformed, it is the expected revision rate of a typical **model**.
 * $\tau^2$ is the variance of the models' true rates, estimated by REML.
 * Each model gets weight $w_i = 1/(v_i + \tau^2)$. When models differ a lot (large $\tau^2$), the weights move towards equal, so a model with 45% of the procedures cannot dominate the mean the way it dominates an n-weighted or published mean.
 * The CI of $\mu$ uses the **Knapp-Hartung** adjustment ($t_{k-1}$ with a rescaled variance), which has better coverage than z-based CIs when there are only 4–13 models (IntHout et al. 2014).
@@ -112,9 +127,9 @@ $$y_i = \mu + u_i + e_i, \qquad u_i \sim N(0, \tau^2), \quad e_i \sim N(0, v_i)$
 
 | Metric | Meaning |
 |---|---|
-| RE mean (95% CI) | Pooled rate of a typical model, back-transformed from the logit scale |
+| RE mean (95% CI) | Pooled rate of a typical model, back-transformed from the `r SC$label` scale |
 | 95% prediction interval | Range expected for the rate of a new, typical model. It includes $\tau^2$, so it is wider than the CI |
-| $\tau^2$ | Between-model variance (logit scale). 0 means models differ only by chance |
+| $\tau^2$ | Between-model variance (`r SC$label` scale, so not comparable across scales). 0 means models differ only by chance |
 | $I^2$ | Share of total variation that is between-model rather than sampling error. Roughly 25 / 50 / 75% = low / moderate / high |
 | $Q$ (p) | Cochran's test that all models share one rate. It has low power with few models |
 | Weight | `weights()`: each model's share of the inverse-variance weight |
@@ -149,7 +164,7 @@ for (j in names(runs)) for (r in names(runs[[j]]$fits)) {
   k <- f$re$k
   cat("\n\n#### ", JOINT_NAME[[j]], ", ", r, "\n\n", sep = "")
   par(mar = c(4, 0, 1, 0))
-  metafor::forest(f$re, transf = function(x) plogis(x) * 100, addpred = TRUE, refline = f$summary$p_pub * 100,
+  metafor::forest(f$re, transf = function(x) SC$inv(x) * 100, addpred = TRUE, refline = f$summary$p_pub * 100,
                   header = c("Model", paste0(T_YR, "-yr revision % [95% CI]")), xlab = "Cumulative revision (%)",
                   digits = 1, cex = 0.85)
   src("<b>metafor output</b>: <code>forest(rma())</code>. Squares: models (size ~ weight). Diamond: RE mean (95% CI). Dotted line under the diamond: 95% prediction interval. Vertical line: published registry mean.")
@@ -205,7 +220,7 @@ for (j in names(runs)) {
 
 ```{r loo_years}
 purrr::map_dfr(names(exts), function(j) purrr::map_dfr(unlist(P$time_yrs), function(t) {
-  r <- loo_run(exts[[j]], cfg, t, k_min = P$k_min, test = P$ma_test); if (is.null(r)) NULL else r$summary
+  r <- loo_run(exts[[j]], cfg, t, k_min = P$k_min, test = P$ma_test, scale = P$ma_scale); if (is.null(r)) NULL else r$summary
 })) |>
   arrange(joint, registry, time_yr) |>
   transmute(joint = JOINT_NAME[joint], registry, years = time_yr, k,
@@ -387,6 +402,49 @@ purrr::imap_dfr(screen_by_method, function(ss, m) ss |>
   knitr::kable(caption = "Models above / below the limit, by limits, reference and level")
 ```
 
+# Sensitivity: complementary log-log vs logit scale {#scale-sensitivity}
+
+```{r scale_cmp, include = isTRUE(P$scale_compare), eval = isTRUE(P$scale_compare)}
+SCALE_CMP <- loo_scale_compare(exts, cfg, unlist(P$time_yrs), scales = c(P$ma_scale, SC_OTHER), k_min = P$k_min,
+                               test = P$ma_test, level = P$summary_level, method = P$summary_method)
+SCALE_W <- loo_scale_wide(SCALE_CMP, P$ma_scale, SC_OTHER)
+```
+
+The whole analysis was refitted on the `r MA_SCALES[[SC_OTHER]]$label` scale, with the SE taken from the same published CIs on that scale. The table compares the two scales at each follow-up year: the random-effects mean, the lowest leave-one-out mean and the model it leaves out, and the models flagged against the lowest leave-one-out mean (`r level_label(P$summary_level)`, `r METHOD_NAME[[P$summary_method]]` limits). $\tau^2$ is on each scale's own units and is not comparable between rows.
+
+```{r scale_table, eval = isTRUE(P$scale_compare)}
+SCALE_CMP |>
+  arrange(joint, registry, time_yr, factor(scale, levels = c(P$ma_scale, SC_OTHER))) |>
+  transmute(joint = JOINT_NAME[joint], registry, years = time_yr, scale, k,
+            `RE mean (95% CI)` = sprintf("%s (%s-%s)", pct(p_re, 0.01), pct(p_re_lb), pct(p_re_ub)),
+            `95% prediction interval` = sprintf("%s-%s", pct(pi_lb), pct(pi_ub)),
+            tau2 = num(tau2, 3), I2 = paste0(round(I2), "%"),
+            `lowest LOO mean` = pct(loo_re_min, 0.01), `left out` = drop_for_min_re,
+            `flagged vs lowest LOO` = ifelse(flagged == "", "none", flagged)) |>
+  knitr::kable(caption = "Random-effects results on the two scales, by follow-up year (metafor rma, leave1out)")
+```
+
+```{r scale_agree, results = "asis", eval = isTRUE(P$scale_compare)}
+cat("\n\n**Agreement.** Across ", nrow(SCALE_W), " registry-by-year fits, the random-effects means differ by at most ",
+    sprintf("%.2f", max(abs(SCALE_W$d_re_pp))), " percentage points and the lowest leave-one-out means by at most ",
+    sprintf("%.2f", max(abs(SCALE_W$d_loo_pp))), " points. The same model gives the lowest leave-one-out mean in ",
+    sum(SCALE_W$same_drop), " of ", nrow(SCALE_W), " fits, and the same models are flagged in ",
+    sum(SCALE_W$same_flags), " of ", nrow(SCALE_W), ".", sep = "")
+dis <- dplyr::filter(SCALE_W, !same_drop | !same_flags)
+if (nrow(dis)) {
+  cat(" Where they differ:\n\n")
+  none <- function(x) ifelse(x == "", "none", x)
+  flag_txt <- ifelse(dis$same_flags, "; flags identical",
+                     paste0("; flags ", none(dis$flagged_a), " vs ", none(dis$flagged_b)))
+  cat(paste0("* ", JOINT_NAME[dis$joint], " ", dis$registry, ", ", dis$time_yr, " years: lowest LOO leaves out ",
+             dis$drop_for_min_re_a, " (", pct(dis$loo_re_min_a, 0.01), ", ", P$ma_scale, ") vs ",
+             dis$drop_for_min_re_b, " (", pct(dis$loo_re_min_b, 0.01), ", ", SC_OTHER, ")", flag_txt),
+      collapse = "\n")
+  cat("\n\n")
+} else cat("\n\n")
+cat("Differences between the scales are small next to the width of the control limits, so the choice of scale does not change the conclusions where the flags agree. Where they differ, the two candidate means are close, and the model is borderline on either scale.\n\n")
+```
+
 # Summary {#summary}
 
 ```{r summary_data}
@@ -502,6 +560,12 @@ cat("\n\n**Meta-analytic check** (`rstudent`, ", level_label(P$summary_level), "
 
 * den Broeder N, den Broeder AA, Verhoef LM, van den Hoogen FHJ, van der Maas A, van den Bemt BJF. Non-medical switching from tocilizumab to sarilumab in rheumatoid arthritis patients with low disease activity, an observational study. *Clin Pharmacol Ther* 2023;114(4):810–814. doi:10.1002/cpt.2999.
 * Groot JAM, Jonkers FJ, Kievit AJ, Kuijer PPFM, Hoozemans MJM. Beneficial and limiting factors for return to work following anterior cruciate ligament reconstruction: a retrospective cohort study. *Arch Orthop Trauma Surg* 2017;137(2):155–166. doi:10.1007/s00402-016-2594-6.
+* Heaps BM, Blevins JL, Chiu YF, Konopka JF, Patel SP, McLawhorn AS. Improving estimates of annual survival rates for medial unicompartmental knee arthroplasty, a meta-analysis. *J Arthroplasty* 2019;34(7):1538–1545. doi:10.1016/j.arth.2019.02.061.
+* Kalbfleisch JD, Prentice RL. *The Statistical Analysis of Failure Time Data*. 2nd ed. Hoboken, NJ: Wiley; 2002.
+* International Prosthesis Benchmarking Working Group. *Report by the International Prosthesis Benchmarking Working Group*. Final draft, May 2018 (Recommendation 10).
+* Lin L, Chu H. Meta-analysis of proportions using generalized linear mixed models. *Epidemiology* 2020;31(5):713–717. doi:10.1097/EDE.0000000000001232.
+* Salika T, Turner RM, Fisher D, Tierney JF, White IR. Implications of analysing time-to-event outcomes as binary in meta-analysis: empirical evidence from the Cochrane Database of Systematic Reviews. *BMC Med Res Methodol* 2022;22:73. doi:10.1186/s12874-022-01541-9.
+* Greco T, Comisi C, Mascio A, et al. Risk of total ankle arthroplasty or ankle fusion following distal tibial fractures: a systematic review and meta-analysis. *J Funct Morphol Kinesiol* 2026;11(1):79. doi:10.3390/jfmk11010079.
 * Spiegelhalter DJ. Funnel plots for comparing institutional performance. *Stat Med* 2005;24:1185–1202.
 * Viechtbauer W. Conducting meta-analyses in R with the metafor package. *J Stat Softw* 2010;36(3):1–48.
 * Viechtbauer W, Cheung MW-L. Outlier and influence diagnostics for meta-analysis. *Res Synth Methods* 2010;1:112–125.

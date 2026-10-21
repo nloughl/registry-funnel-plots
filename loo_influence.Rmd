@@ -17,6 +17,8 @@ params:
   screen_refs: ["pub", "min_loo_re"]   # references drawn in that section (published mean, lowest metafor leave-one-out mean)
   limit_method: "exact"          # funnel limits for the reference comparisons: "exact" (recommended) or "normal"
   ma_test: "knha"                # CI of the random-effects mean: "knha" (Knapp-Hartung) or "z"
+  ma_scale: "cloglog"            # meta-analysis scale: "cloglog" (complementary log-log, primary) or "logit"
+  scale_compare: true            # add the cloglog vs logit sensitivity section
   k_min: 3                       # minimum number of models for a meta-analysis
   x_log: true
   out_dir: "figures"
@@ -34,6 +36,9 @@ LV <- P$level
 pct <- function(x, acc = 0.1) ifelse(is.na(x), "-", scales::percent(x, acc))
 num <- function(x, d = 2) formatC(x, digits = d, format = "f")
 JOINT_NAME <- c(ANKLE = "Total ankle", ELBOW = "Total elbow")
+SC <- ma_scale(P$ma_scale)
+SCN <- P$ma_scale
+SC_OTHER <- setdiff(names(MA_SCALES), P$ma_scale)[1]
 save_fig <- function(p, slug, width = 11, height = 6) if (isTRUE(P$save_png))
   save_plot(p, paste0("loo_", slug), P$out_dir, width = width, height = height)
 ```
@@ -64,7 +69,7 @@ The analysis is exploratory and **the app is not changed**. The decisions and th
 ```{r load}
 cfg <- load_rare_config(".")
 exts <- purrr::compact(purrr::map(stats::setNames(unlist(P$joints), unlist(P$joints)), ~ load_rare(P$data_dir, .x)))
-runs <- purrr::map(exts, ~ loo_run(.x, cfg, T_YR, k_min = P$k_min, test = P$ma_test))
+runs <- purrr::map(exts, ~ loo_run(.x, cfg, T_YR, k_min = P$k_min, test = P$ma_test, scale = P$ma_scale))
 runs <- purrr::compact(runs)
 skipped <- purrr::imap_chr(runs, ~ paste(.x$skipped, collapse = ", "))
 ```
@@ -72,13 +77,20 @@ skipped <- purrr::imap_chr(runs, ~ paste(.x$skipped, collapse = ", "))
 **Models.** These are the model rows used by the rare-joint funnels: the AOANJRR supplements (A15 ankle, ET6–ET8 elbow) and NJR (3.A4 ankle, 3.E8 elbow), with model names harmonised by `config/rare_device_families.csv`.
 Registries with fewer than `r P$k_min` models, or none at all, are left out of the meta-analysis: `r paste(sprintf("%s: %s", names(skipped), ifelse(skipped == "", "none", skipped)), collapse = "; ")`. LROI publishes no model-level rates for these joints.
 
-**Each model's estimate and its uncertainty.** The meta-analysis needs a variance for each model's rate. Published rates are Kaplan-Meier cumulative revision percentages, not simple counts, so the variance is taken from the **published 95% CI**. That CI already accounts for censoring and the number still at risk. The calculation is done on the **logit** scale, $y_i = \text{logit}(p_i)$, with
+**Each model's estimate and its uncertainty.** The meta-analysis needs a variance for each model's rate. Published rates are Kaplan-Meier cumulative revision percentages, not simple counts, so the variance is taken from the **published 95% CI**. That CI already accounts for censoring and the number still at risk. The calculation is done on a transformed scale, $y_i = f(p_i)$, here the **`r SC$label`** scale (parameter `ma_scale`), with
 
-$$SE_i = \frac{\text{logit}(ucl_i) - \text{logit}(lcl_i)}{2 \times 1.96}.$$
+$$SE_i = \frac{f(ucl_i) - f(lcl_i)}{2 \times 1.96}.$$
 
-The logit scale keeps pooled rates between 0 and 1. It also suits KM CIs, which are asymmetric on the percent scale (wider above than below).
+All pooled results (means, CIs, prediction intervals, leave-one-out means) are back-transformed to the proportion scale with $f^{-1}$ before they are shown or used as funnel references.
 
-* **AOANJRR elbow** stems are printed separately for fracture, OA and RA (ET6–ET8). As in the funnels, each stem's rows are pooled: the rate is n-weighted, and the SE is combined on the percent scale as $SE = \sqrt{\sum (w_j SE_j)^2}$ with $w_j = n_j / \sum n$, using each row's CI width / 3.92. The SE is then moved to the logit scale with the delta method, $SE_{logit} = SE_p / (p(1-p))$.
+| Scale | $f(p)$ | Back-transform $f^{-1}(y)$ | Delta-method factor $f'(p)$ |
+|---|---|---|---|
+| Complementary log-log (primary) | $\log(-\log(1 - p)) = \log(-\log S)$ | $1 - \exp(-\exp(y))$ | $1 / [-(1-p)\log(1-p)]$ |
+| Logit (sensitivity) | $\log(p / (1 - p))$ | $1 / (1 + e^{-y})$ | $1 / [p(1-p)]$ |
+
+The complementary log-log scale is the primary scale because registries build their Kaplan-Meier CIs on it (the log(−log S) variance of Kalbfleisch & Prentice 2002, recommended by the International Prosthesis Benchmarking Working Group 2018, Recommendation 10). The published CIs are symmetric on that scale (median ratio of upper to lower half-width ≈ 1.00), so the SE read back is the registry's own. Heaps et al. (2019) pooled arthroplasty survival on this scale with REML in `metafor`. The logit scale, the usual scale for pooling proportions (Lin & Chu 2020), is run as a [sensitivity analysis](#scale-sensitivity); the two agree closely when event probabilities are low (Salika et al. 2022). Both keep pooled rates between 0 and 1 and allow for the asymmetric KM CIs on the percent scale.
+
+* **AOANJRR elbow** stems are printed separately for fracture, OA and RA (ET6–ET8). As in the funnels, each stem's rows are pooled: the rate is n-weighted, and the SE is combined on the percent scale as $SE = \sqrt{\sum (w_j SE_j)^2}$ with $w_j = n_j / \sum n$, where each row's $SE_j$ is read from its own CI on the analysis scale and moved to the percent scale with the delta method, $SE_j = SE_{y,j} / f'(p_j)$. The SE is then moved to the analysis scale with the delta method, $SE_y = SE_p \times f'(p)$.
 * **Fallback.** If a row has no usable CI or a 0% estimate, the code uses a binomial approximation with a 0.5 continuity correction. No row needs it at present.
 
 ```{r inputs}
@@ -87,10 +99,11 @@ purrr::map_dfr(runs, "models") |>
   arrange(joint, registry, desc(n_total)) |>
   transmute(joint = joint_name, registry, model, n = scales::comma(n_total),
             `share of registry n` = pct(share_n), rate = pct(p),
-            `95% CI` = ifelse(is.na(lcl), sprintf("%s-%s", pct(plogis(yi - 1.96 * sei)), pct(plogis(yi + 1.96 * sei))),
+            `95% CI` = ifelse(is.na(lcl), sprintf("%s-%s", pct(SC$inv(yi - 1.96 * sei)), pct(SC$inv(yi + 1.96 * sei))),
                               sprintf("%s-%s", pct(lcl), pct(ucl))),
-            `SE (logit)` = num(sei, 3), `SE source` = se_source,
+            SE = num(sei, 3), `SE source` = se_source,
             `few at risk` = ifelse(low_at_risk %in% TRUE, "yes", "")) |>
+  rename(!!paste0("SE (", SCN, ")") := SE) |>
   knitr::kable(caption = paste0("Model inputs at ", T_YR, " years"))
 ```
 
@@ -107,7 +120,7 @@ It is an approximation. Kaplan-Meier rates do not add up exactly, because the mo
 
 **2. Meta-analytic leave-one-out (`metafor`).**
 
-* A **random-effects meta-analysis** of the model rates is fitted with `metafor::rma()`: logit scale, REML estimate of the between-model variance $\tau^2$, and `r if (P$ma_test == "knha") "the Knapp-Hartung adjustment" else "z-based"` CI for the pooled mean.
+* A **random-effects meta-analysis** of the model rates is fitted with `metafor::rma()`: `r SC$label` scale, REML estimate of the between-model variance $\tau^2$, and `r if (P$ma_test == "knha") "the Knapp-Hartung adjustment" else "z-based"` CI for the pooled mean.
 * `metafor::leave1out()` refits the model $k$ times, each time leaving out one model.
 * `influence()` returns the diagnostics described below.
 
@@ -123,7 +136,7 @@ The random-effects mean estimates the expected rate for a typical **model**, whi
 |---|---|---|
 | **Share of n** | $n_i / N$ | How much of the registry the model is. |
 | **Weight (CE / RE)** | Share of the inverse-variance weight in the common-effect (CE) and random-effects (RE) fits | RE weight < share of n means the meta-analysis limits the model's pull. |
-| **$\tau^2$** | Between-model variance of the true logit rates | 0 means the models differ only by chance. |
+| **$\tau^2$** | Between-model variance of the true rates on the `r SC$label` scale | 0 means the models differ only by chance. |
 | **$I^2$** | Share of the total variation that is between models rather than sampling error | Roughly 25% = low, 50% = moderate, 75% = high heterogeneity. |
 | **$Q$, p** | Cochran's test that all models share one rate | Low power with few models, so a non-significant Q does not show the models are the same. |
 | **Prediction interval** | Where a new, typical model's rate is expected to fall (95%) | Wider than the CI of the mean. It is the meta-analytic counterpart of a funnel's width at very large n. |
@@ -140,7 +153,7 @@ The random-effects mean estimates the expected rate for a typical **model**, whi
 
 ```{r summary_years}
 yrs_tbl <- purrr::map_dfr(names(exts), function(j) purrr::map_dfr(unlist(P$time_yrs), function(t) {
-  r <- loo_run(exts[[j]], cfg, t, k_min = P$k_min, test = P$ma_test); if (is.null(r)) NULL else r$summary
+  r <- loo_run(exts[[j]], cfg, t, k_min = P$k_min, test = P$ma_test, scale = P$ma_scale); if (is.null(r)) NULL else r$summary
 }))
 yrs_tbl |>
   left_join(tibble(joint = names(JOINT_NAME), joint_name = JOINT_NAME), by = "joint") |>
@@ -411,12 +424,54 @@ screen_all |>
 
 **How to use this for screening.** Models outside the 90% limit against the lowest leave-one-out mean form the review list. Of those, models that are also outside against the published mean, at 95%, or on the meta-analytic test are the stronger signals. A model flagged only at 90% against the lowest leave-one-out mean is the weakest signal: worth a look, and a reason to recheck at the next report year.
 
+# Sensitivity: complementary log-log vs logit scale {#scale-sensitivity}
+
+```{r scale_cmp, eval = isTRUE(P$scale_compare)}
+SCALE_CMP <- loo_scale_compare(exts, cfg, unlist(P$time_yrs), scales = c(P$ma_scale, SC_OTHER), k_min = P$k_min,
+                               test = P$ma_test, level = LV, method = P$limit_method)
+SCALE_W <- loo_scale_wide(SCALE_CMP, P$ma_scale, SC_OTHER)
+```
+
+The meta-analysis was refitted on the `r MA_SCALES[[SC_OTHER]]$label` scale, with each SE taken from the same published CI on that scale. The table compares the random-effects mean, the lowest leave-one-out mean (and the model it leaves out) and the models flagged against that mean (`r scales::percent(LV)` `r P$limit_method` limits). $\tau^2$ is in each scale's own units.
+
+```{r scale_table, eval = isTRUE(P$scale_compare)}
+SCALE_CMP |>
+  arrange(joint, registry, time_yr, factor(scale, levels = c(P$ma_scale, SC_OTHER))) |>
+  transmute(joint = JOINT_NAME[joint], registry, years = time_yr, scale, k,
+            `RE mean (95% CI)` = sprintf("%s (%s-%s)", pct(p_re, 0.01), pct(p_re_lb), pct(p_re_ub)),
+            `95% prediction interval` = sprintf("%s-%s", pct(pi_lb), pct(pi_ub)),
+            tau2 = num(tau2, 3), I2 = paste0(round(I2), "%"),
+            `lowest LOO mean` = pct(loo_re_min, 0.01), `left out` = drop_for_min_re,
+            `flagged vs lowest LOO` = ifelse(flagged == "", "none", flagged)) |>
+  knitr::kable(caption = "Random-effects results on the two scales, by follow-up year (metafor rma, leave1out)")
+```
+
+```{r scale_agree, results = "asis", eval = isTRUE(P$scale_compare)}
+none <- function(x) ifelse(x == "", "none", x)
+cat("\n\n**Agreement.** Across ", nrow(SCALE_W), " registry-by-year fits, the random-effects means differ by at most ",
+    sprintf("%.2f", max(abs(SCALE_W$d_re_pp))), " percentage points and the lowest leave-one-out means by at most ",
+    sprintf("%.2f", max(abs(SCALE_W$d_loo_pp))), " points. The same model gives the lowest leave-one-out mean in ",
+    sum(SCALE_W$same_drop), " of ", nrow(SCALE_W), " fits, and the same models are flagged in ",
+    sum(SCALE_W$same_flags), " of ", nrow(SCALE_W), ".", sep = "")
+dis <- dplyr::filter(SCALE_W, !same_drop | !same_flags)
+if (nrow(dis)) {
+  cat(" Where they differ:\n\n")
+  flag_txt <- ifelse(dis$same_flags, "; flags identical",
+                     paste0("; flags ", none(dis$flagged_a), " vs ", none(dis$flagged_b)))
+  cat(paste0("* ", JOINT_NAME[dis$joint], " ", dis$registry, ", ", dis$time_yr, " years: lowest LOO leaves out ",
+             dis$drop_for_min_re_a, " (", pct(dis$loo_re_min_a, 0.01), ", ", P$ma_scale, ") vs ",
+             dis$drop_for_min_re_b, " (", pct(dis$loo_re_min_b, 0.01), ", ", SC_OTHER, ")", flag_txt),
+      collapse = "\n")
+}
+cat("\n\n")
+```
+
 # Decisions and justifications {#decisions}
 
 | # | Decision | Justification |
 |---|---|---|
 | 1 | Analyse total ankle and total elbow, AOANJRR and NJR only | These are the registries with model-level rates. LROI has none for these joints. The UKA registries have many models and large n, so one model drives the mean much less (can be run later with the same functions). |
-| 2 | Model variance from the **published KM 95% CI**, on the logit scale | Accounts for censoring and the number at risk, which a binomial variance from n does not. The logit scale keeps pooled rates in (0, 1) and suits asymmetric KM CIs. |
+| 2 | Model variance from the **published KM 95% CI**, on the **complementary log-log** scale; logit as a sensitivity analysis | Accounts for censoring and the number at risk, which a binomial variance from n does not. Registries compute KM CIs on the log(−log S) scale (Kalbfleisch & Prentice 2002; Benchmarking Working Group 2018), so the SE read back from the CI is the registry's own; the same scale was used for pooling UKA survival by Heaps et al. (2019). The logit refit (Lin & Chu 2020) checks that results do not depend on the choice ([sensitivity](#scale-sensitivity)). All results are back-transformed to the proportion scale. |
 | 3 | AOANJRR elbow stems pooled across diagnoses, SE by n-weighted combination + delta method | Matches the rare-joint funnels (one point per stem). Leaving out a stem must drop all its diagnosis rows together. |
 | 4 | Two leave-one-out methods: **subtraction** and **random-effects (`metafor::leave1out`)** | Subtraction keeps the published, patient-weighted estimand and the unlisted models. The random-effects version also limits the pull of the other large models, through more equal weights. |
 | 5 | REML $\tau^2$ with **Knapp-Hartung** CIs; a common-effect fit only for comparison | REML is the recommended $\tau^2$ estimator. Knapp-Hartung gives better coverage of the pooled mean with few models (IntHout et al. 2014). The common-effect fit shows how much the n-dominant model would drive an inverse-variance mean. |
@@ -446,6 +501,11 @@ screen_all |>
 **Methods**
 
 
+* Kalbfleisch JD, Prentice RL. *The Statistical Analysis of Failure Time Data*. 2nd ed. Hoboken, NJ: Wiley; 2002.
+* International Prosthesis Benchmarking Working Group. *Report by the International Prosthesis Benchmarking Working Group*. Final draft, May 2018 (Recommendation 10).
+* Heaps BM, Blevins JL, Chiu YF, Konopka JF, Patel SP, McLawhorn AS. Improving estimates of annual survival rates for medial unicompartmental knee arthroplasty, a meta-analysis. *J Arthroplasty* 2019;34(7):1538–1545. doi:10.1016/j.arth.2019.02.061.
+* Lin L, Chu H. Meta-analysis of proportions using generalized linear mixed models. *Epidemiology* 2020;31(5):713–717. doi:10.1097/EDE.0000000000001232.
+* Salika T, Turner RM, Fisher D, Tierney JF, White IR. Implications of analysing time-to-event outcomes as binary in meta-analysis: empirical evidence from the Cochrane Database of Systematic Reviews. *BMC Med Res Methodol* 2022;22:73. doi:10.1186/s12874-022-01541-9.
 * Spiegelhalter DJ. Funnel plots for comparing institutional performance. *Stat Med* 2005;24:1185–1202.
 * Viechtbauer W, Cheung MW-L. Outlier and influence diagnostics for meta-analysis. *Res Synth Methods* 2010;1:112–125.
 * Viechtbauer W. Conducting meta-analyses in R with the metafor package. *J Stat Softw* 2010;36(3):1–48.
