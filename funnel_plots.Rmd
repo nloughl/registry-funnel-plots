@@ -360,8 +360,8 @@ The limits are recomputed around the chosen value, so the width changes too. Eve
 
 Where the CI comes from:
 
-* **NJR, SIRIS and EPRD**: published with the summary row (EPRD: 2025 Table 57, all unicondylar knee arthroplasties).
-* **LROI** (cemented + uncemented totals) and **AOANJRR** (male + female KP22 subtotals): the parts' CIs are combined into an approximate pooled CI. Each part's SE is backed out of its CI width, $SE_i = (ucl_i - lcl_i)/3.92$, and then $SE = \sqrt{\sum (w_i SE_i)^2}$ with $w_i = n_i / \sum n$.
+* **NJR, SIRIS, EPRD and AOANJRR**: published with the summary row (EPRD: 2025 Table 57, all unicondylar knee arthroplasties; AOANJRR: 2025 Table KP18, all primary UKA for osteoarthritis, modern prostheses).
+* **LROI** (cemented + uncemented totals): the parts' CIs are combined into an approximate pooled CI. Each part's SE is backed out of its CI width, $SE_i = (ucl_i - lcl_i)/3.92$, and then $SE = \sqrt{\sum (w_i SE_i)^2}$ with $w_i = n_i / \sum n$.
 * A registry with no CI (only if it falls back to the mean of its listed devices) **keeps its mean** under every reference.
 
 The registries are large, so these CIs are narrow (NJR ±0.08 percentage points). Changing the reference mainly affects devices close to a limit.
