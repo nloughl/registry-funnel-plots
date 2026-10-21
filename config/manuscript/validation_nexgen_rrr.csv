@@ -1,0 +1,10 @@
+# NexGen Stemmed Option Tibia (recalled 2022): revision rate ratios (observed / expected revisions; expected from
+# Kaplan-Meier log-rank analysis adjusted for sex, age group and year cohort) from the NJR Variant Report (March 2022),
+# as published by the manufacturer and the MHRA. No cumulative revision rates are public for these constructs (the NJR
+# 19th Annual Report, p. 357, only describes the investigation), so they are shown on a ratio (O/E) funnel.
+# Expected revisions E are back-calculated from the CI: SE(log RRR) = (ln ucl - ln lcl) / (2 x 1.96); O ~ 1 / SE^2; E = O / RRR.
+variant,comparator,n_total,rrr,lcl,ucl,source
+NexGen Stemmed Option + LPS Flex,"PS non-NexGen TKR (n = 287,768)",6859,1.73,1.55,1.92,"Zimmer Biomet urgent field safety notice ZFA 2022-00240 (6 Dec 2022), Table 1"
+NexGen Stemmed Option + LPS Flex GSF,"PS non-NexGen TKR (n = 287,768)",3571,1.56,1.33,1.82,"Zimmer Biomet urgent field safety notice ZFA 2022-00240 (6 Dec 2022), Table 1"
+NexGen Stemmed Option + LPS Flex,"All other TKR (n = 1,193,124)",6859,2.04,1.83,2.26,"MHRA Device Safety Information DSI/2023/003 (15 Feb 2023), Table 1"
+NexGen Stemmed Option + LPS Flex GSF,"All other TKR (n = 1,193,124)",3571,1.85,1.58,2.16,"MHRA Device Safety Information DSI/2023/003 (15 Feb 2023), Table 1"

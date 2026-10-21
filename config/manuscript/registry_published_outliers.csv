@@ -1,0 +1,20 @@
+# Implants each registry itself identified as outliers in its 2025 reports, for the agreement analysis.
+# family = our harmonised brand/model, left blank when the listed implant itself is not in our model data
+# (e.g. AOANJRR UKA combinations no longer used, which KP17 excludes), so it is reported as 'not comparable';
+# family = our harmonised brand (config/device_families.csv for UKA, config/rare_device_families.csv for
+# ankle/elbow), blank when the brand is not in our data. direction: high = worse than expected, low = better.
+# A registry with no row for a joint published no outlier for it; see registry_outlier_methods.csv.
+# Page = printed page unless marked "PDF p.".
+joint,registry,published_name,family,direction,registry_status,source
+UKA,AOANJRR,Advance/Advance,,high,identified and no longer used,"2025 Annual Report Tables IP16-IP17, pp. 693-694"
+UKA,AOANJRR,BalanSys Uni/BalanSys Uni Convex,,high,identified and no longer used,"Tables IP16-IP17, pp. 693-694 (combination not in KP17; the BalanSys in our data is BalanSys Uni/Uni Fixed)"
+UKA,AOANJRR,BalanSys Uni/BalanSys Uni Mobile,,high,identified and no longer used,"Tables IP16-IP17, pp. 693-694 (combination not in KP17; the BalanSys in our data is BalanSys Uni/Uni Fixed)"
+UKA,AOANJRR,Eius/Eius,,high,identified and no longer used,"Tables IP16-IP17, pp. 693-694"
+UKA,AOANJRR,Freedom PKR Active/Freedom PKR Active,,high,identified and no longer used,"Tables IP16-IP17, pp. 693-694"
+UKA,AOANJRR,GMK-UNI/GMK-UNI,GMK Uni,high,identified and no longer used,"Tables IP16-IP17, pp. 693-694"
+UKA,AOANJRR,Uniglide/Uniglide,AMC / Uniglide,high,identified and no longer used,"Tables IP16-IP17, pp. 693-694"
+UKA,AOANJRR,Preservation Mobile (tibial component),Preservation,high,identified and no longer used,"Tables IP16-IP17, pp. 693-694"
+UKA,SIRIS,Journey Uni,Journey,high,active outlier (long-term evaluation; 2-yr rate below the alert boundary),"Figure 5.37 p. 179; outlier watch list p. 195 (2-yr evaluation: no outlier, Figure 5.36 p. 177)"
+UKA,SIRIS,Allegretto,Allegretto,low,below-average long-term revision (one surgical unit),Figure 5.38 p. 179
+ANKLE,AOANJRR,Hintermann Series H3/Hintermann Series H3,Hintermann Series H3,high,re-identified and still used,"2025 Annual Report Tables IP31-IP32, p. 709; ankle supplement Table A15 footnote (PDF p. 15)"
+ANKLE,AOANJRR,S.T.A.R/S.T.A.R,STAR,high,identified and no longer used,"2025 Annual Report Tables IP31-IP32, p. 709"

@@ -1,0 +1,21 @@
+# Known poor (positive control) and known good (negative control) implants for validating the funnel framework.
+# 3-year cumulative revision (%) with 95% CI as published. Every row was checked against the source PDF.
+# role: reference = the funnel centre for that registry x class (several reference rows with the same
+#       ref_group are pooled n-weighted, CI pooled from the published CIs as for the UKA means);
+#       positive = known failure (should be flagged above the upper limit);
+#       negative = known good performer in this class (should not be flagged above the upper limit).
+# ref_includes_model: yes if the reference population contains the control implant itself (inclusive mean);
+#       the Rmd also gives the subtraction leave-one-out reference p_(-i) = (N p - n_i p_i) / (N - n_i) for these.
+registry,class,role,model,n_total,estimate,lcl,ucl,ref_group,ref_includes_model,source
+AOANJRR,Total resurfacing,reference,Modern total resurfacing (comparator),16808,2.3,2.1,2.5,ref,no,"ASR/ASR Total Resurfacing Hip Investigation 2025, Table 2 'Other Total Resurfacing Hip' (p. 2); = Annual Report 2025 Table HT108 TOTAL (modern prostheses), p. 389"
+AOANJRR,Total resurfacing,positive,ASR / ASR,1168,7.2,5.9,8.8,,,"ASR/ASR Total Resurfacing Hip Investigation 2025, Tables 1-2 (pp. 1-2)"
+AOANJRR,Total resurfacing,negative,BHR / BHR,12318,2.5,2.2,2.8,,,"Annual Report 2025, Table HT108 (p. 389)"
+AOANJRR,MoM THA >32 mm (OA),reference,Metal/metal >32 mm male (OA),8386,4.8,4.4,5.3,ref,yes,"Metal/Metal Supplementary Report 2025, Table MM6 (p. 9)"
+AOANJRR,MoM THA >32 mm (OA),reference,Metal/metal >32 mm female (OA),6038,7.0,6.3,7.6,ref,yes,"Metal/Metal Supplementary Report 2025, Table MM6 (p. 9); male + female = 14,424 = Table MM9 TOTAL"
+AOANJRR,MoM THA >32 mm (OA),positive,ASR / ASR (ASR XL),3982,9.8,8.9,10.7,,,"Metal/Metal Supplementary Report 2025, Table MM9 (p. 12)"
+AOANJRR,MoM THA >32 mm (OA),negative,BHR / BHR (large-head THA),2223,3.3,2.6,4.1,,,"Metal/Metal Supplementary Report 2025, Table MM9 (p. 12). NB: the BHR acetabular cup in conventional THA is an AOANJRR HTARR outlier vs ALL conventional THA (Annual Report 2025 Tables IP7-IP8)"
+NJR,Total resurfacing,reference,All resurfacing,43503,2.87,2.72,3.04,ref,yes,"22nd Annual Report 2025 (Hips), Table 3.H5 (p. 50)"
+NJR,Total resurfacing,positive,ASR Resurfacing Cup,2943,5.83,5.04,6.74,,,"22nd Annual Report 2025 (Hips), Table 3.H7 (a) (p. 87)"
+NJR,Total resurfacing,negative,BHR Resurfacing Cup,24918,2.23,2.05,2.42,,,"22nd Annual Report 2025 (Hips), Table 3.H7 (a) (p. 87)"
+NJR,Uncemented MoM THA,reference,All uncemented MoM,29209,3.50,3.29,3.72,ref,yes,"22nd Annual Report 2025 (Hips), Table 3.H5 (p. 50)"
+NJR,Uncemented MoM THA,positive,Corail / ASR / ASR Resurfacing cup (ASR XL),2746,7.46,6.54,8.52,,,"22nd Annual Report 2025 (Hips), Table 3.H7 (b) (p. 92)"
