@@ -1,0 +1,281 @@
+---
+title: "Funnel trajectories: `r paste(params$models, collapse = ', ')` across follow-up years"
+author: "Naomi Loughlin"
+date: "`r format(Sys.Date())`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    code_folding: hide
+params:
+  data_dir: "../regitry-outlier-detection/outputs/UKA"   # regextract outputs (2025 reports)
+  procedure: "UKA"
+  models: ["Oxford"]          # brand(s) from config/device_families.csv
+  detail_level: 1             # 1 = one point per brand per registry (n-weighted); 0 = registry rows as listed
+  years: [1, 3, 5, 10]        # follow-up years reported by every registry
+  levels: [0.95, 0.998]       # control limits
+  limit_method: "normal"      # "normal" (as funnel_plots.Rmd) or "exact"
+  x_log: true                 # log x axis on the funnels
+  out_dir: "figures"
+  table_dir: "tables"
+  save_png: true
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE, fig.width = 13, fig.height = 5)
+library(dplyr)
+library(ggplot2)
+for (f in list.files("R", pattern = "\\.R$", full.names = TRUE)) source(f)
+P <- params
+MODELS <- unlist(P$models); M1 <- MODELS[1]
+YEARS <- unlist(P$years); LEVELS <- unlist(P$levels)
+Z95 <- qnorm(1 - (1 - min(LEVELS)) / 2); Z998 <- qnorm(1 - (1 - max(LEVELS)) / 2)
+SLUG <- paste0("ftraj_", tolower(P$procedure), "_", paste(tolower(gsub("[^A-Za-z0-9]+", "_", MODELS)), collapse = "_"),
+               if (P$detail_level == 0) "_rows" else "")
+f2 <- function(x, d = 2) formatC(x, digits = d, format = "f")
+yr_lab <- function(t) paste(t, ifelse(t == 1, "year", "years"))
+save_fig <- function(p, name, width = 13, height = 5) if (isTRUE(P$save_png)) save_plot(p, paste0(SLUG, "_", name), P$out_dir, width, height)
+dir.create(P$table_dir, showWarnings = FALSE)
+N_LAB <- c(n_total = "Total procedures (n)", n_eff = "Effective sample size (n_eff, from the published KM CI)")
+```
+
+```{r data}
+ext <- load_extraction(P$data_dir, P$procedure)
+fam <- load_families("config/device_families.csv")
+ov_path <- "config/registry_means_override.csv"
+overrides <- if (file.exists(ov_path)) readr::read_csv(ov_path, comment = "#", show_col_types = FALSE) else NULL
+pts <- purrr::map_dfr(YEARS, ~ tr_points(ext$device, ext$casemix, .x, fam, MODELS, P$detail_level, overrides)) |>
+  mutate(year = factor(yr_lab(time_yr), levels = yr_lab(YEARS)),
+         z = tr_z(p, p_ref, n_total, P$limit_method),
+         z_eff = tr_z(p, p_ref, n_eff, P$limit_method),
+         status = tr_status(z, Z95, Z998), status_eff = tr_status(z_eff, Z95, Z998),
+         line = if (P$detail_level == 0) paste0(registry, ": ", label) else registry)
+cur_n <- tr_curves(pts, LEVELS, P$limit_method, "n_total") |> mutate(year = factor(yr_lab(time_yr), levels = yr_lab(YEARS)))
+cur_e <- tr_curves(filter(pts, is.finite(n_eff)), LEVELS, P$limit_method, "n_eff") |> mutate(year = factor(yr_lab(time_yr), levels = yr_lab(YEARS)))
+
+traj <- pts |>
+  group_by(registry, line) |>
+  arrange(time_yr, .by_group = TRUE) |>
+  summarise(n = max(n_total),
+            pattern = tr_classify(z[match(YEARS, time_yr)], YEARS, Z95, Z998),
+            pattern_eff = tr_classify(z_eff[match(YEARS, time_yr)], YEARS, Z95, Z998),
+            !!!setNames(lapply(YEARS, function(t) rlang::expr(z[time_yr == !!t][1])), paste0("z_", YEARS)),
+            .groups = "drop")
+readr::write_csv(select(pts, registry, line, time_yr, n_total, n_eff, p, p_ref, ratio, dev, z, z_eff, status, status_eff, mean_source),
+                 file.path(P$table_dir, paste0(SLUG, "_points.csv")))
+readr::write_csv(traj, file.path(P$table_dir, paste0(SLUG, "_trajectories.csv")))
+changed <- filter(pts, status != status_eff)
+```
+
+# Executive summary
+
+**What this file does.** It runs the standard funnel at several follow-up years (`r paste(YEARS, collapse = ", ")`) and follows each model through them. Nothing in the funnel changes:
+
+- **Centre:** each registry's funnel is centred on its **overall registry mean** at that year, from the same `registry_means()` as `funnel_plots.Rmd`.
+- **Limits:** the usual `r paste(sapply(LEVELS, level_label), collapse = " and ")` limits (`r P$limit_method` method).
+- **Points:** `r M1` `r if (P$detail_level == 1) "at detail level 1: one point per registry, the registry's rows weighted by procedures" else "rows as listed by each registry (detail level 0)"`.
+
+Two things are added:
+
+1. **The funnel as a z-score over time.** The limits are drawn from $z = (p - \bar p)/\sqrt{\bar p(1-\bar p)/n}$, so a point is outside the `r level_label(min(LEVELS))` funnel exactly when $|z| > `r f2(Z95)`$, and outside the `r level_label(max(LEVELS))` funnel when $|z| > `r f2(Z998)`$. Plotting z against follow-up year shows how each model moves through the funnels. Each model then gets a simple trajectory label: **persistent** (beyond the `r level_label(min(LEVELS))` limit at ≥ 2 consecutive years), **early** (only at the first two years), **late** (only from the third year on) or **isolated**, each high or low.
+2. **A censoring sensitivity analysis.** The funnel uses n = all procedures. At longer follow-up, many knees have not reached year t (they are censored), so the true uncertainty is larger than a binomial with n implies. The KM *estimate* handles censoring; the binomial *limits* do not. The sensitivity analysis replaces n with the **effective sample size** implied by the published KM 95% CI, $n_\text{eff} = p(1-p)/\text{SE}^2$. That is the n a binomial would need to match the KM uncertainty. Combescure et al. (2025) avoided n entirely by taking SEs from the published CIs; using n_eff is the funnel equivalent.
+
+**Outputs.**
+
+- [Side-by-side funnels](#funnels) at each year on the ratio scale (all panels comparable) and on the difference scale (y-axis free per panel), with total n (primary) and n_eff (sensitivity).
+- [Z-score trajectories](#trajectories) with both sample sizes.
+- A [trajectory table](#table) and a table of the flags that change with n_eff.
+- Figures are written to `figures/`, named `r SLUG`_*.png; tables to `tables/`.
+
+# Highlights
+
+```{r highlights, results = "asis", echo = FALSE}
+p5 <- filter(pts, time_yr == 5) |> arrange(desc(ratio))
+ratio_eff <- pts |> group_by(time_yr) |> summarise(r = median(n_eff / n_total, na.rm = TRUE))
+cat(sprintf("- **Trajectories (total n):** %s.\n", paste(sprintf("%s: %s", traj$line, tolower(traj$pattern)), collapse = "; ")))
+cat(sprintf("- **At 5 years** the ratio to the registry mean ranges from %s (%s) to %s (%s).\n",
+            f2(min(p5$ratio)), p5$line[nrow(p5)], f2(max(p5$ratio)), p5$line[1]))
+cat(sprintf("- **Censoring matters at long follow-up.** The median n_eff / n is %s at 1 year, %s at 3 years, %s at 5 years and %s at 10 years. The funnels with total n are therefore too narrow at later years.\n",
+            f2(ratio_eff$r[ratio_eff$time_yr == 1]), f2(ratio_eff$r[ratio_eff$time_yr == 3]),
+            f2(ratio_eff$r[ratio_eff$time_yr == 5]), f2(ratio_eff$r[ratio_eff$time_yr == 10])))
+cat(sprintf("- **Sensitivity (n_eff):** %s of %s registry-year flags change. %s %s\n",
+            nrow(changed), nrow(pts),
+            if (nrow(changed)) paste0("Changes: ", paste(sprintf("%s %s y (%s → %s)", changed$line, changed$time_yr, changed$status, changed$status_eff), collapse = "; "), ".") else "",
+            { d <- filter(traj, pattern != pattern_eff)
+              if (nrow(d)) paste0("Trajectory labels that change: ", paste(sprintf("%s (%s → %s)", d$line, tolower(d$pattern), tolower(d$pattern_eff)), collapse = "; "), ".")
+              else "No trajectory label changes." }))
+cat("- **Reading the flags over time.** Flagging a model if it is outside the funnel at *any* of four years roughly triples the false-alarm rate (about 7.5% instead of 2.5% at the 95% level, from the simulation in `funnel_over_time.Rmd`). The persistent rule (two consecutive years) keeps it at or below the single-funnel rate, so persistent flags are the ones to act on.\n")
+```
+
+# Side-by-side funnels {#funnels}
+
+Each panel is one follow-up year. All registries are overlaid after standardising to their own mean (ratio = 1 or difference = 0), as in the standardised overlay of `funnel_plots.Rmd`. Dashed lines are the `r level_label(min(LEVELS))` limits; solid lines are the `r level_label(max(LEVELS))` limits.
+
+```{r funnel-fn}
+plot_years <- function(points, curves, y = c("ratio", "difference"), n_col = "n_total", free_y = FALSE) {
+  y <- match.arg(y)
+  yc <- y_cols(y)
+  points <- filter(points, is.finite(.data[[n_col]]))
+  n_floor <- min(points[[n_col]]) * 0.6
+  cv <- filter(curves, n >= n_floor)
+  pd <- mutate(points, x = .data[[n_col]], yv = .data[[yc$point]],
+               out = abs(if (n_col == "n_eff") z_eff else z) > Z998)
+  # symmetric y range per panel (free) or overall (fixed), from the visible curves and the points
+  rng <- bind_rows(transmute(cv, year, v = .data[[yc$upper]]), transmute(cv, year, v = .data[[yc$lower]]),
+                   transmute(pd, year, v = yv)) |>
+    filter(is.finite(v)) |> mutate(h = abs(v - yc$ref))
+  rng <- if (free_y) group_by(rng, year) |> summarise(h = max(h) * 1.08, .groups = "drop") else
+    mutate(distinct(rng, year), h = max(rng$h) * 1.08)
+  blank <- bind_rows(transmute(rng, year, v = yc$ref - h), transmute(rng, year, v = yc$ref + h))
+  ggplot() +
+    geom_hline(yintercept = yc$ref, colour = "black", linewidth = 0.4) +
+    geom_line(data = cv, aes(n, .data[[yc$upper]], colour = registry, linetype = level_lab, group = interaction(registry, level_lab)), linewidth = 0.55) +
+    geom_line(data = cv, aes(n, .data[[yc$lower]], colour = registry, linetype = level_lab, group = interaction(registry, level_lab)), linewidth = 0.55) +
+    geom_blank(data = blank, aes(y = v)) +
+    geom_point(data = pd, aes(x, yv, colour = registry), size = 2.8) +
+    ggrepel::geom_text_repel(data = pd, aes(x, yv, label = if (P$detail_level == 0) label else registry, colour = registry),
+                             size = 2.6, show.legend = FALSE, seed = 1, min.segment.length = 0, segment.size = 0.25) +
+    scale_colour_manual(values = registry_colour(sort(unique(pd$registry))), name = "Registry") +
+    scale_linetype_level(LEVELS) +
+    scale_y_continuous(labels = yc$fmt) +
+    (if (isTRUE(P$x_log)) scale_x_log10(labels = scales::comma) else scale_x_continuous(labels = scales::comma)) +
+    facet_wrap(~ year, nrow = 1, scales = if (free_y) "free_y" else "fixed") +
+    labs(x = N_LAB[[n_col]], y = yc$lab) +
+    theme_funnel()
+}
+lvl_txt <- if (P$detail_level == 1) "one point per registry (rows weighted by procedures)" else "registry rows as listed"
+```
+
+## Primary: total procedures (n)
+
+```{r funnels-ratio, fig.height = 5}
+p <- plot_years(pts, cur_n, "ratio", "n_total") +
+  labs(title = sprintf("%s: funnel at each follow-up year, ratio to the registry mean", M1),
+       subtitle = sprintf("Each registry's funnel is centred on its own all-UKA mean at that year; %s; same y-axis in every panel.", lvl_txt))
+p; save_fig(p, "funnels_ratio")
+```
+
+```{r funnels-diff, fig.height = 5}
+p <- plot_years(pts, cur_n, "difference", "n_total", free_y = TRUE) +
+  labs(title = sprintf("%s: funnel at each follow-up year, difference from the registry mean", M1),
+       subtitle = "Difference scale (as funnel_plots.Rmd). The y-axis is free per panel because rates, and so differences, grow with follow-up.")
+p; save_fig(p, "funnels_difference")
+```
+
+Why there are two versions:
+
+- **Ratio scale.** The panels share one y-axis and can be compared directly.
+- **Difference scale.** This matches the main funnels, but a constant relative excess produces larger differences at later years because revision rates rise with follow-up. A shared y-axis would squeeze the early panels, so each panel gets its own.
+
+## Sensitivity: effective sample size (n_eff)
+
+The funnels are the same, but each point is placed at its effective sample size from the published KM CI. The limits are drawn over n_eff, so they are wider where follow-up is censored.
+
+```{r funnels-ratio-eff, fig.height = 5}
+p <- plot_years(pts, cur_e, "ratio", "n_eff") +
+  labs(title = sprintf("%s: funnel at each follow-up year with effective sample size, ratio scale", M1),
+       subtitle = "n_eff = p(1 - p) / SE² from the published KM 95% CI: the binomial n that matches the KM uncertainty (accounts for censoring).")
+p; save_fig(p, "funnels_ratio_neff")
+```
+
+```{r funnels-diff-eff, fig.height = 5}
+p <- plot_years(pts, cur_e, "difference", "n_eff", free_y = TRUE) +
+  labs(title = sprintf("%s: funnel at each follow-up year with effective sample size, difference scale", M1),
+       subtitle = "y-axis free per panel.")
+p; save_fig(p, "funnels_difference_neff")
+```
+
+# Z-score trajectories {#trajectories}
+
+Each line is one registry's `r M1` across follow-up years. Solid lines use total n (primary) and dashed lines use n_eff (sensitivity). The horizontal lines are the funnel limits: the shaded band is inside the `r level_label(min(LEVELS))` funnel, and the solid lines mark the `r level_label(max(LEVELS))` limits.
+
+```{r trajectories, fig.height = 5.5, fig.width = 11}
+zl <- bind_rows(transmute(pts, registry, line, time_yr, z, sample = "Total n (primary)"),
+                transmute(pts, registry, line, time_yr, z = z_eff, sample = "n_eff (sensitivity)")) |>
+  mutate(sample = factor(sample, levels = c("Total n (primary)", "n_eff (sensitivity)")))
+zr <- max(4, ceiling(max(abs(zl$z), na.rm = TRUE)))
+p <- ggplot(zl, aes(time_yr, z, colour = registry, linetype = sample, group = interaction(line, sample))) +
+  annotate("rect", xmin = -Inf, xmax = Inf, ymin = -Z95, ymax = Z95, fill = "grey92") +
+  geom_hline(yintercept = c(-Z998, Z998), linetype = LEVEL_LINETYPES[[level_label(max(LEVELS))]] %||% "solid", colour = "grey35") +
+  geom_hline(yintercept = c(-Z95, Z95), linetype = LEVEL_LINETYPES[[level_label(min(LEVELS))]] %||% "dashed", colour = "grey35") +
+  geom_hline(yintercept = 0, colour = "grey60") +
+  geom_line(linewidth = 0.8) + geom_point(size = 1.9) +
+  ggrepel::geom_text_repel(data = filter(zl, sample == "Total n (primary)", time_yr == max(YEARS)),
+                           aes(label = if (P$detail_level == 0) line else registry), nudge_x = 0.5, hjust = 0, direction = "y",
+                           size = 3, show.legend = FALSE, segment.size = 0.2) +
+  scale_colour_manual(values = registry_colour(sort(unique(zl$registry))), name = "Registry") +
+  scale_linetype_manual(values = c("Total n (primary)" = "solid", "n_eff (sensitivity)" = "22"), name = NULL) +
+  scale_x_continuous(breaks = YEARS, expand = expansion(mult = c(0.03, 0.12))) +
+  coord_cartesian(ylim = c(-zr, zr)) +
+  labs(x = "Years since primary", y = "Funnel z-score", title = sprintf("%s: funnel z-score at each follow-up year", M1),
+       subtitle = sprintf("z = (p − registry mean) / √(mean(1 − mean)/n). Shaded = inside the %s funnel; lines at ±%s (%s) and ±%s (%s).",
+                          level_label(min(LEVELS)), f2(Z95), level_label(min(LEVELS)), f2(Z998), level_label(max(LEVELS)))) +
+  theme_funnel()
+p; save_fig(p, "z_trajectories", 11, 5.5)
+```
+
+# Tables {#table}
+
+```{r traj-table}
+fz <- function(x) ifelse(is.na(x), "–", f2(x, 1))
+knitr::kable(traj |> transmute(Registry = registry, Line = line, n = scales::comma(n),
+                               !!!setNames(lapply(paste0("z_", YEARS), function(cn) fz(traj[[cn]])), paste0("z ", YEARS, " y")),
+                               `Pattern (total n)` = pattern, `Pattern (n_eff)` = pattern_eff),
+             caption = "Funnel z-score at each year (total n) and trajectory label with total n and with n_eff") |>
+  (\(k) if (P$detail_level == 1) knitr::kable(traj |> transmute(Registry = registry, n = scales::comma(n),
+                               !!!setNames(lapply(paste0("z_", YEARS), function(cn) fz(traj[[cn]])), paste0("z ", YEARS, " y")),
+                               `Pattern (total n)` = pattern, `Pattern (n_eff)` = pattern_eff),
+             caption = "Funnel z-score at each year (total n) and trajectory label with total n and with n_eff") else k)()
+```
+
+| Label | Rule |
+|---|---|
+| Persistent high / low | Beyond the `r level_label(min(LEVELS))` limit at ≥ 2 consecutive years |
+| Early high / low | Beyond it only at the first two years (`r paste(YEARS[1:2], collapse = " and/or ")` y) |
+| Late high / low | Beyond it only from `r YEARS[3]` years on, not consecutively |
+| Isolated | Any other single or non-consecutive exceedance |
+| "(99.8%)" | Beyond the `r level_label(max(LEVELS))` limit at least once in that direction |
+
+```{r points-table}
+knitr::kable(pts |> arrange(time_yr, registry) |>
+               transmute(Year = time_yr, Line = line, `n_eff / n` = f2(n_eff / n_total),
+                         n = scales::comma(n_total), `n_eff` = scales::comma(round(n_eff)), `CRR %` = f2(100 * p), `Registry mean %` = f2(100 * p_ref),
+                         Ratio = f2(ratio), z = f2(z, 1), `Status (n)` = status, `z (n_eff)` = f2(z_eff, 1), `Status (n_eff)` = status_eff),
+             caption = "Every point: total n and effective n, rate, registry mean, ratio, z and funnel status with each sample size")
+```
+
+```{r neff-table}
+knitr::kable(pts |> mutate(r = n_eff / n_total) |> group_by(registry, time_yr) |> summarise(r = median(r), .groups = "drop") |>
+               tidyr::pivot_wider(names_from = time_yr, values_from = r, names_glue = "{time_yr} y") |>
+               mutate(across(-registry, ~ f2(.x))) |> rename(Registry = registry),
+             caption = sprintf("n_eff / n for %s per registry and year: how much smaller the effective sample is than the number of procedures", M1))
+```
+
+# Methods notes
+
+**Unchanged from `funnel_plots.Rmd`:**
+
+- **Registry mean** at each year:
+  - NJR, SIRIS, EPRD and AOANJRR use their published all-UKA summary rows. For AOANJRR this is Table KP18: all primary UKAs for osteoarthritis, modern prostheses, n = 50,481, with its own KM 95% CI;
+  - LROI pools its cemented and uncemented totals;
+  - overrides in `config/registry_means_override.csv` take priority.
+- **AOANJRR population.** The Oxford rows come from Table KP17 (modern prostheses, all diagnoses, TOTAL n = 50,910). KP18 is the osteoarthritis subset (n = 50,481, 99.2% of KP17), so the model rows and the mean describe practically the same population. KP18 replaces the earlier pooled male + female subtotals of KP22, which had the same population and n and gave the same rates (e.g. 4.41% vs 4.4% at 3 years). It adds a directly published CI and a 7-year value.
+- **Limits:** `funnel_limits()` (`r P$limit_method`).
+- **Detail level 1:** the n-weighted mean of a registry's rows.
+
+**z-score.** With the normal method, z is the funnel's standardised deviation, so the z bands and the funnel limits flag exactly the same points. With the exact method, z is the normal quantile of the mid-p binomial tail, so it matches the exact limits.
+
+**Effective sample size.**
+
+- Per row: $\text{SE} = (\text{UCL} - \text{LCL})/3.92$ from the published KM 95% CI, and $n_\text{eff} = p(1-p)/\text{SE}^2$.
+- For a level-1 point: $\text{Var}(\bar p) = \sum w_i^2\,\text{Var}(p_i)$ with $w_i = n_i/\sum n$, and $n_\text{eff} = \bar p(1-\bar p)/\text{Var}(\bar p)$.
+- The registry mean is still the funnel centre. Only the point's n changes.
+
+# Limitations
+
+1. **Total n ignores censoring.** At long follow-up the limits are too narrow, more so for newer designs with shorter follow-up. That is why n_eff is reported as a sensitivity analysis.
+2. **n_eff depends on how the CIs are reported.** Registries compute KM CIs differently (log–log vs plain Greenwood), and AOANJRR, EPRD and SIRIS round them to one decimal place, which makes n_eff noisy at small rates (1 year). It can even come out slightly above n, as for EPRD at 1 year. Treating the CI as symmetric on the proportion scale is approximate.
+3. **The overall registry mean includes the model.** For a brand that is a large share of a registry, the mean is pulled toward it and its deviations look smaller. Oxford is about 46% of NJR, 58% of EPRD and 75% of LROI UKAs. This is the same convention as the main funnels.
+4. **Repeated looks.** z-scores at different years share patients and are correlated. Flagging at any of four years inflates false alarms about threefold; the persistent label does not.
+5. **Changing composition.** At later years each point reflects older cohorts and only the variants that reach that follow-up.
+6. **Metrics and populations differ between registries.** Each model is compared only with its own registry's funnel.
