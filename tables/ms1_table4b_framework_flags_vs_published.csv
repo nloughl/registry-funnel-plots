@@ -1,0 +1,56 @@
+Detail level,Registry,Model,Status,Same brand on the registry's list,Registry publishes a list
+L1,AOANJRR,Journey [2],▲ 95%,no,yes
+L1,AOANJRR,Oxford [3],▲ 99.8%,no,yes
+L1,AOANJRR,Persona,▼ 95%,no,yes
+L1,AOANJRR,Restoris / Mako MCK,▼ 99.8%,no,yes
+L1,AOANJRR,Sigma HP,▼ 95%,no,yes
+L1,AOANJRR,Triathlon,▲ 95%,no,yes
+L1,AOANJRR,ZUK / Physica ZUK,▼ 99.8%,no,yes
+L1,EPRD,Journey [2],▲ 99.8%,no,no
+L1,EPRD,Link Sled [2],▲ 99.8%,no,no
+L1,EPRD,MOTO,▼ 99.8%,no,no
+L1,EPRD,Persona,▼ 99.8%,no,no
+L1,EPRD,Restoris / Mako MCK,▼ 99.8%,no,no
+L1,EPRD,Sigma HP,▼ 95%,no,no
+L1,EPRD,Triathlon,▲ 99.8%,no,no
+L1,EPRD,Univation,▲ 99.8%,no,no
+L1,EPRD,ZUK / Physica ZUK,▼ 99.8%,no,no
+L1,LROI,Allegretto,▲ 99.8%,no,no
+L1,LROI,BalanSys,▲ 99.8%,no,no
+L1,LROI,Genesis Uni,▲ 99.8%,no,no
+L1,LROI,HLS Uni,▲ 95%,no,no
+L1,LROI,Restoris / Mako MCK,▼ 99.8%,no,no
+L1,LROI,ZUK / Physica ZUK,▼ 99.8%,no,no
+L1,NJR,AMC / Uniglide,▲ 99.8%,no,yes
+L1,NJR,Persona,▼ 99.8%,no,yes
+L1,NJR,Preservation,▲ 99.8%,no,yes
+L1,NJR,Restoris / Mako MCK,▼ 99.8%,no,yes
+L1,NJR,Sigma HP,▼ 99.8%,no,yes
+L1,NJR,ZUK / Physica ZUK [2],▼ 99.8%,no,yes
+L1,SIRIS,Allegretto,▼ 99.8%,yes,yes
+L1,SIRIS,GMK Uni,▲ 99.8%,no,yes
+L1,SIRIS,Journey,▲ 99.8%,yes,yes
+L1,SIRIS,Persona,▼ 95%,no,yes
+L1,SIRIS,Restoris / Mako MCK,▼ 99.8%,no,yes
+L2,AOANJRR,Oxford · cemented,▲ 99.8%,no,yes
+L2,AOANJRR,Oxford · hybrid,▲ 95%,no,yes
+L2,EPRD,Journey · cemented [2],▲ 99.8%,no,no
+L2,EPRD,Link Sled · cemented [2],▲ 99.8%,no,no
+L2,EPRD,MOTO · cemented,▼ 99.8%,no,no
+L2,EPRD,Oxford · cemented [3],▼ 95%,no,no
+L2,EPRD,Persona · cemented,▼ 99.8%,no,no
+L2,EPRD,Restoris / Mako MCK · cemented,▼ 99.8%,no,no
+L2,EPRD,Sigma HP · cemented,▼ 95%,no,no
+L2,EPRD,Triathlon · cemented,▲ 99.8%,no,no
+L2,EPRD,Univation · cemented,▲ 99.8%,no,no
+L2,EPRD,ZUK / Physica ZUK · cemented,▼ 99.8%,no,no
+L2,LROI,Allegretto · cemented,▲ 99.8%,no,no
+L2,LROI,BalanSys · cemented,▲ 99.8%,no,no
+L2,LROI,Genesis Uni · cemented,▲ 99.8%,no,no
+L2,LROI,HLS Uni · cemented,▲ 95%,no,no
+L2,LROI,Oxford · cemented,▲ 99.8%,no,no
+L2,LROI,Oxford · cementless,▼ 99.8%,no,no
+L2,LROI,Restoris / Mako MCK · cemented,▼ 99.8%,no,no
+L2,LROI,ZUK / Physica ZUK · cemented,▼ 99.8%,no,no
+L2,NJR,Oxford · cementless,▼ 99.8%,no,yes
+L2,SIRIS,Oxford · cementless,▲ 95%,no,yes

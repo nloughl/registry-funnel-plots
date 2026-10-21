@@ -6,3 +6,4 @@
 funnel_plots_files/
 figures/*.png
 Rplots.pdf
+config/lroi_elbow_deidentified.csv

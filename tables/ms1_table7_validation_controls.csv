@@ -1,0 +1,13 @@
+Control,Registry,Class,Implant,n,3-yr %,Reference,Reference %,Upper 95% / 99.8% limit %,Status,As expected,Source
+Known poor (positive),AOANJRR,MoM THA >32 mm (OA),ASR / ASR (ASR XL),"3,982",9.80,published,5.72,6.44 / 6.86,▲ 99.8%,yes,"Metal/Metal Supplementary Report 2025, Table MM9 (p. 12)"
+Known poor (positive),AOANJRR,MoM THA >32 mm (OA),ASR / ASR (ASR XL),"3,982",9.80,leave-one-out,4.17,4.79 / 5.14,▲ 99.8%,yes,"Metal/Metal Supplementary Report 2025, Table MM9 (p. 12)"
+Known poor (positive),AOANJRR,Total resurfacing,ASR / ASR,"1,168",7.20,published,2.30,3.16 / 3.66,▲ 99.8%,yes,"ASR/ASR Total Resurfacing Hip Investigation 2025, Tables 1-2 (pp. 1-2)"
+Known poor (positive),NJR,Total resurfacing,ASR Resurfacing Cup,"2,943",5.83,published,2.87,3.47 / 3.82,▲ 99.8%,yes,"22nd Annual Report 2025 (Hips), Table 3.H7 (a) (p. 87)"
+Known poor (positive),NJR,Total resurfacing,ASR Resurfacing Cup,"2,943",5.83,leave-one-out,2.66,3.24 / 3.57,▲ 99.8%,yes,"22nd Annual Report 2025 (Hips), Table 3.H7 (a) (p. 87)"
+Known poor (positive),NJR,Uncemented MoM THA,Corail / ASR / ASR Resurfacing cup (ASR XL),"2,746",7.46,published,3.50,4.19 / 4.58,▲ 99.8%,yes,"22nd Annual Report 2025 (Hips), Table 3.H7 (b) (p. 92)"
+Known poor (positive),NJR,Uncemented MoM THA,Corail / ASR / ASR Resurfacing cup (ASR XL),"2,746",7.46,leave-one-out,3.09,3.74 / 4.11,▲ 99.8%,yes,"22nd Annual Report 2025 (Hips), Table 3.H7 (b) (p. 92)"
+Known good (negative),AOANJRR,MoM THA >32 mm (OA),BHR / BHR (large-head THA),"2,223",3.30,published,5.72,6.69 / 7.24,▼ 99.8%,yes,"Metal/Metal Supplementary Report 2025, Table MM9 (p. 12). NB: the BHR acetabular cup in conventional THA is an AOANJRR HTARR outlier vs ALL conventional THA (Annual Report 2025 Tables IP7-IP8)"
+Known good (negative),AOANJRR,MoM THA >32 mm (OA),BHR / BHR (large-head THA),"2,223",3.30,leave-one-out,6.16,7.16 / 7.74,▼ 99.8%,yes,"Metal/Metal Supplementary Report 2025, Table MM9 (p. 12). NB: the BHR acetabular cup in conventional THA is an AOANJRR HTARR outlier vs ALL conventional THA (Annual Report 2025 Tables IP7-IP8)"
+Known good (negative),AOANJRR,Total resurfacing,BHR / BHR,"12,318",2.50,published,2.30,2.56 / 2.72,–,yes,"Annual Report 2025, Table HT108 (p. 389)"
+Known good (negative),NJR,Total resurfacing,BHR Resurfacing Cup,"24,918",2.23,published,2.87,3.08 / 3.20,▼ 99.8%,yes,"22nd Annual Report 2025 (Hips), Table 3.H7 (a) (p. 87)"
+Known good (negative),NJR,Total resurfacing,BHR Resurfacing Cup,"24,918",2.23,leave-one-out,3.73,3.96 / 4.10,▼ 99.8%,yes,"22nd Annual Report 2025 (Hips), Table 3.H7 (a) (p. 87)"

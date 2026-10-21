@@ -1,0 +1,6 @@
+Joint,Registry,Models (k),Procedures (N),Published mean %,Random-effects mean %,"Leave-one-out means, range %",Lowest leave-one-out mean %,Model left out for the lowest mean,Largest model,Largest model's share of N,"Mean shift, lowest LOO − published (pp)"
+Total ankle,AOANJRR,13,"5,379",5.04,5.18,4.89–5.56,4.89,STAR,Infinity,28%,-0.15
+Total ankle,NJR,10,"11,321",2.97,3.00,2.78–3.39,2.78,Zenith,Infinity,43%,-0.19
+Total elbow,AOANJRR,4,"1,881",8.91,8.85,8.17–9.84,8.17,Nexel [3 dx],Coonrad-Morrey [3 dx],38%,-0.74
+Total elbow,NJR,5,"4,740",4.76,4.57,4.24–4.93,4.24,Latitude / Latitude EV Stem,Coonrad-Morrey,47%,-0.52
+Total elbow,LROI,5,666,6.90,6.68,5.11–8.80,5.11,LROI elbow 1,LROI elbow 1,36%,-1.79

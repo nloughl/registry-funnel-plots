@@ -1,0 +1,13 @@
+Joint,Reference,Limit,Models,High,Low
+Total ankle,Published mean,90%,23,7,6
+Total ankle,Published mean,95%,23,6,5
+Total ankle,Published mean,99.8%,23,3,3
+Total ankle,Lowest LOO mean,90%,23,7,5
+Total ankle,Lowest LOO mean,95%,23,6,4
+Total ankle,Lowest LOO mean,99.8%,23,4,2
+Total elbow,Published mean,90%,14,1,2
+Total elbow,Published mean,95%,14,1,1
+Total elbow,Published mean,99.8%,14,1,0
+Total elbow,Lowest LOO mean,90%,14,3,0
+Total elbow,Lowest LOO mean,95%,14,3,0
+Total elbow,Lowest LOO mean,99.8%,14,2,0

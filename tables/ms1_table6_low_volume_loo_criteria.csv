@@ -1,0 +1,12 @@
+Joint,Registry,Models (k),Procedures (N),Registry mean %,n for n·p₀ ≥ 5,"n to detect 2× rate, 99.8%","n to detect 2× rate, 95%","n to detect 2× rate, 90%",Largest model,Largest share (w),"Lowest LOO mean, subtraction %",Model left out,Shift (pp),"Shift, % of mean",Shift / CI half-width of mean,"Lowest LOO mean, random effects %",Median model n,Models below 99.8% detectable n,Trigger: ≥ 25% of models below 99.8% detectable n,Trigger: lowest LOO shifts mean ≥ 5%
+Unicompartmental knee,AOANJRR,9,"50,481",4.40,114,417,192,155,Oxford [3],49%,3.62,Oxford [3],-0.78,-17.6%,3.88,-,"2,071",1 of 9 (11%),no,yes
+Unicompartmental knee,EPRD,11,"78,265",5.70,88,310,149,110,Oxford [5],58%,5.60,Univation,-0.10,-1.8%,0.68,-,"2,080",0 of 11 (0%),no,no
+Unicompartmental knee,LROI,9,"61,917",4.80,105,393,189,129,Oxford [2],75%,4.71,Genesis Uni,-0.09,-1.8%,0.47,-,827,3 of 9 (33%),yes,no
+Unicompartmental knee,NJR,10,"206,689",3.21,156,608,264,212,Oxford [5],46%,3.17,AMC / Uniglide,-0.04,-1.2%,0.50,-,"3,521",0 of 10 (0%),no,no
+Unicompartmental knee,SIRIS,10,"33,407",5.70,88,310,149,110,Oxford [2],24%,5.58,Oxford [2],-0.12,-2.1%,0.47,-,"2,646",0 of 10 (0%),no,no
+Total ankle,AOANJRR,13,"5,379",5.04,100,363,167,124,Infinity,28%,4.64,Hintermann Series H3,-0.40,-7.9%,0.59,4.89,400,6 of 13 (46%),yes,yes
+Total ankle,LROI,0,"1,460",4.16,121,451,204,149,-,-,-,-,-,-,-,-,-,-,-,-
+Total ankle,NJR,10,"11,321",2.97,169,632,304,230,Infinity,43%,2.74,Zenith,-0.23,-7.9%,0.67,2.78,676,5 of 10 (50%),yes,yes
+Total elbow,AOANJRR,4,"1,881",8.91,57,192,94,69,Coonrad-Morrey,38%,8.41,Nexel,-0.50,-5.7%,0.36,8.17,512,1 of 4 (25%),yes,yes
+Total elbow,LROI,5,666,6.90,73,264,122,89,LROI elbow 1,36%,5.44,LROI elbow 1,-1.46,-21.2%,-,5.11,53,5 of 5 (100%),yes,yes
+Total elbow,NJR,5,"4,740",4.76,105,385,178,143,Coonrad-Morrey,47%,4.45,Latitude,-0.31,-6.5%,0.47,4.24,460,2 of 5 (40%),yes,yes

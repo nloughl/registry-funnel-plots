@@ -41,8 +41,8 @@ The funnels can be centred on the registry mean or on the lower or upper 95% CI 
 Everything is standardised to the chosen reference: y = rate − reference, so the funnel stays centred on 0 and the points shift by (bound − mean). Outlier status and excess revisions, n × (rate − reference), use the chosen reference.
 
 Where each registry's CI comes from:
-- **NJR, SIRIS and EPRD:** published (EPRD 2025 Table 57, all UKA).
-- **LROI (cemented + uncemented) and AOANJRR (male + female KP22):** pooled from the parts' published CIs. SEᵢ = (ucl − lcl)/3.92 and SE = √Σ(wᵢ·SEᵢ)², with n weights. This is approximate.
+- **NJR, SIRIS, EPRD and AOANJRR:** published (EPRD 2025 Table 57, all UKA; AOANJRR 2025 Table KP18, all UKA for OA, modern prostheses).
+- **LROI (cemented + uncemented):** pooled from the parts' published CIs. SEᵢ = (ucl − lcl)/3.92 and SE = √Σ(wᵢ·SEᵢ)², with n weights. This is approximate.
 - Registries with no CI (none at present) keep their mean under every reference.
 - **Overrides:** `config/registry_means_override.csv` accepts `lcl_pct` / `ucl_pct`.
 
@@ -81,6 +81,66 @@ A separate report. The case-mix envelope in `funnel_plots.Rmd` only shows how fu
 
 ```r
 rmarkdown::render("casemix_adjustment.Rmd")
+```
+
+## CRR over follow-up time across registries (`crr_meta_analysis.Rmd`)
+A separate report that pools each model's published cumulative revision rates across registries at every follow-up year. It adapts the statistical methods of Combescure et al. 2025 (EFORT Open Rev, doi:10.1530/EOR-2024-0020) from hip cups and stems to knee brands.
+- **Inputs:** `UKA_long.csv` (2025 reports). The brand comes from detail level 1 (`config/device_families.csv`), and each registry row is kept as a variant with its own CI.
+- **Method:**
+  - CRR is put on the cloglog scale, and each SE is backed out of the published 95% CI.
+  - Per-year REML random-effects pooling, with variant nested in registry. CIs use a t-distribution with containment df.
+  - Heterogeneity: Cochran's Q, multilevel I² and σ² per level.
+  - Table 3/4 analogues: multivariable meta-regressions of the 5-year CRR on registry + fixation (Table 3) and on registry + design variant (Table 4), also at 1, 3 and 10 years.
+  - A single model across all follow-up years (cloglog quadratic in log t, with random slopes).
+  - Sensitivity analyses.
+- **Outputs:**
+  - Figure 1 analogue (pooled CRR over time, overall and by fixation).
+  - Figure 2 analogue (registry variants over time, one line per registry row).
+  - A one-line-per-registry version (rows collapsed per registry), with each registry's weight under the nested, independent and collapsed approaches.
+  - Every trajectory figure in two versions: all follow-up years, and the core years 1/3/5/10 (files ending `_core`).
+  - Table 2 analogue: `tables/crr_ma_<proc>_<models>_table2.csv`. Table 3/4 analogues: `..._table3_4.csv`.
+  - Forest plots.
+  - Figures are written to `figures/crr_ma_*`.
+- **Parameters:** `models` (default Oxford; several brands give the full Figure 1 / Table 2 layout), `by_fixation`, `table34_year` (5), `core_years` (1, 3, 5, 10), `k_reg_min` (3), `test` (`t` or `z`), `attribute_source` (`design`).
+- Code: `R/crr_meta.R`. Needs metafor and Matrix.
+
+```r
+rmarkdown::render("crr_meta_analysis.Rmd")
+rmarkdown::render("crr_meta_analysis.Rmd", params = list(models = c("Oxford", "ZUK / Physica ZUK", "Journey")))
+```
+
+## Funnel trajectories (`funnel_trajectories.Rmd`)
+This report runs the standard funnel at 1, 3, 5 and 10 years and follows each model through the funnels. Nothing in the funnel changes: each registry is centred on its overall registry mean at that year, and the limits come from `funnel_limits()`.
+- **Side-by-side funnels at each year**, in two versions: the ratio scale with one y-axis for all panels, and the difference scale with the y-axis free per panel.
+- **Funnel z-score**, z = (p − mean)/√(mean(1 − mean)/n), plotted over years. |z| > 1.96 means outside the 95% funnel and |z| > 3.09 outside the 99.8% funnel.
+- **Trajectory labels:** persistent (beyond 95% at ≥ 2 consecutive years), early, late or isolated, each high or low.
+- **Censoring sensitivity analysis:** n is replaced by the effective sample size n_eff = p(1 − p)/SE², with SE from the published KM 95% CI. The KM estimate handles censoring but binomial limits with total n do not, so they are too narrow at long follow-up.
+- **Parameters:** `models` (Oxford), `detail_level` (1 = brand per registry, n-weighted; 0 = rows), `years`, `levels`, `limit_method`, `x_log`.
+- **Code:** `R/funnel_traj.R`. Figures: `figures/ftraj_*`. Tables: `tables/ftraj_*`.
+
+`funnel_over_time.Rmd` is kept as an **exploratory** report (rest-of-registry comparators, interval HRs, cross-registry pooling, joint model, false-alarm simulation).
+
+```r
+rmarkdown::render("funnel_trajectories.Rmd")
+```
+
+## Funnels over follow-up time, exploratory (`funnel_over_time.Rmd`)
+This report keeps the funnels' within-registry comparison and adds follow-up time and cross-registry pooling from Combescure et al. 2025.
+- **Comparison:** each model row is compared with the **rest of its own registry** (registry mean minus the model's rows). The comparison is a log cumulative HR on the cloglog scale with a z-score; |z| > 3.09 is outside the 99.8% funnel. SEs are taken from the published KM CIs.
+- **Outputs:**
+  - one standardised funnel per year (HR vs precision, all registries on one funnel);
+  - z-score trajectories over 1/3/5/10 years (brand per registry and variants);
+  - interval (conditional) HRs for 0–1, 1–3, 3–5 and 5–10 years, to separate early from late failure;
+  - pooled HR per year and per interval (variants nested in registry, with a shared-comparator covariance);
+  - a joint model across years, log HR = α + β log t, where β < 0 means the excess fades and β > 0 means it grows;
+  - a trajectory classification (persistent / early / late / isolated; high / low);
+  - simulated false-alarm rates of each flagging rule;
+  - a comparison with the standard 3-year funnel.
+- **Parameters:** `models` (Oxford), `core_years` (1, 3, 5, 10), `late_interval` (5–10), `k_reg_min` (3), `max_unsubtracted` (0.10; drops registry-years where the comparator would still contain much of the model), `n_sim`.
+- **Code:** `R/funnel_time.R` (uses `R/crr_meta.R`). Figures: `figures/fot_*`. Tables: `tables/fot_*`.
+
+```r
+rmarkdown::render("funnel_over_time.Rmd")
 ```
 
 ## Random-effects leave-one-out report (`loo_metafor.Rmd`)
@@ -133,7 +193,7 @@ These are read from the regextract outputs `outputs/ANKLE/` and `outputs/ELBOW/`
   - `elbow_by_diagnosis`
 - **App:** a **Rare joints** tab next to the knee tab, with:
   - joint, follow-up year (the years reported by at least 2 registries), model, registries
-  - control limit, distribution and reference
+  - control limits (any of 90%, 95% and 99.8%; outliers are judged at the widest one ticked), distribution and reference
   - AOANJRR elbow pooled vs per diagnosis
   - y scale, log x, labels
 
@@ -239,7 +299,7 @@ Funnel plots from your own numbers only, with no registry data. It starts with o
 - **Standardised, ratio to own reference:** the same, as rate / reference, with every funnel centred on 1.
 - With **Every funnel**, the standardised plot can instead show each model once per funnel, relative to that funnel's reference ("Points on the standardised plot"). By default it shows each model once against its own reference, and the other comparisons stay in the table.
 
-Other settings: control limit (95%, 99.8% or both), funnel distribution, log x axis and labels. Points are diamonds in their set's colour, with red/green rings above/below the limits. The summary gives, per set and against its own funnel, the outlier counts, procedures with a high-outlier model and the cumulative excess, defined as in the registry tabs. The CSV download has one row per model and funnel, with the method and level used.
+Other settings: control limits (any of 90%, 95% and 99.8%, drawn dotted, dashed and solid; outliers are judged at the widest one ticked), funnel distribution, log x axis and labels. Points are diamonds in their set's colour, with red/green rings above/below the limits. The summary gives, per set and against its own funnel, the outlier counts, procedures with a high-outlier model and the cumulative excess, defined as in the registry tabs. The CSV download has one row per model and funnel, with the method and level used.
 
 ## Layout
 | File | Contents |
@@ -257,6 +317,12 @@ Other settings: control limit (95%, 99.8% or both), funnel distribution, log x a
 | `config/rare_device_families.csv` | Harmonised rare-joint model names |
 | `R/casemix_adjust.R` | Case-mix adjustment report: class rates, shifted / centred reference funnels, `classify_casemix()`, option A and B plots |
 | `casemix_adjustment.Rmd` | Case-mix adjustment report (adjusted funnels and model point ranges) |
+| `R/crr_meta.R` | CRR meta-analysis across registries: cloglog inputs, per-year pooling, meta-regression, joint model across years |
+| `crr_meta_analysis.Rmd` | Pooled CRR over follow-up time across registries (Combescure et al. 2025 approach) |
+| `R/funnel_traj.R` | Funnel trajectories: points per year (rows or brand), funnel z-score, n_eff, trajectory labels |
+| `funnel_trajectories.Rmd` | Standard funnel at several follow-up years, z-score trajectories, n_eff sensitivity analysis |
+| `R/funnel_time.R` | Funnels over time: rest-of-registry comparators, log-HR contrasts, interval HRs, pooling, joint model, trajectory classification, false-alarm simulation |
+| `funnel_over_time.Rmd` | Exploratory: outlier trajectories over follow-up, within registry and pooled across registries |
 | `R/loo.R` | Leave-one-out / influence report: model inputs (SE from KM CI), `loo_fit()` (metafor), `loo_status()`, calibration, plots |
 | `loo_metafor.Rmd` | Random-effects (metafor) leave-one-out report with summary of drivers, least-biased mean and outliers |
 | `loo_influence.Rmd` | Leave-one-out and influence analysis of rare-joint registry means |
@@ -273,8 +339,10 @@ specific years to keep them.
 ### Registry means
 For each registry, the funnel centre at `time_yr` is taken from the first of these sources that is available:
 1. A manual override in `config/registry_means_override.csv`.
-2. The registry's own summary row: NJR "All unicompartmental", SIRIS "CH average", EPRD "Unicondylar knee arthroplasties" (2025 Table 57), LROI cemented + uncemented pooled by n.
-3. Pooled case-mix subtotals: AOANJRR KP22 male + female.
+2. The registry's own summary row: NJR "All unicompartmental", SIRIS "CH average", EPRD "Unicondylar knee arthroplasties" (2025 Table 57), AOANJRR "Unicompartmental" (2025 Table KP18: all primary UKA for OA, modern prostheses, n = 50,481), LROI cemented + uncemented pooled by n.
+3. Pooled case-mix subtotals (e.g. AOANJRR KP22 male + female). Used only if a registry has no summary row. AOANJRR used this before KP18 was extracted; KP22 covers the same population (n = 50,481) and gave the same rates.
+
+AOANJRR's model rows (Table KP17) cover modern prostheses for all diagnoses (TOTAL n = 50,910). KP18 is the OA subset, 99.2% of those procedures, so the mean and the models describe practically the same population.
 4. **Fallback**: the n-weighted mean of the listed devices (no CI). No registry uses this at present; EPRD did with its 2024 report, which had no UKA total row.
 
 `mean_source` in the report says which source each registry used.

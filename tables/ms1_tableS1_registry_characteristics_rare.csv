@@ -1,0 +1,31 @@
+Joint,Characteristic,AOANJRR,NJR,LROI
+Total ankle,Country,Australia,"England, Wales, Northern Ireland, Isle of Man, Guernsey",Netherlands
+Total ankle,Report,2025 Demographics and Outcome of Ankle Arthroplasty Supplementary Report,22nd Annual Report 2025 (Ankles),Online annual report 2025
+Total ankle,Data period,to 2024-12-31,2010-04-01 to 2024-12-31,2014-01-01 to 2024-12-31
+Total ankle,National coverage (%),99,100,100
+Total ankle,"Primary procedures, n","5,379 ¹","11,321 ¹",192 ¹
+Total ankle,"Age, years, mean (SD)",67.3 (9.0),69 (62-75)†,70.4 (7.6)
+Total ankle,"Female, %",37.9,39.4,33
+Total ankle,"Osteoarthritis, %",94.4,NR,86.4
+Total ankle,Revision metric,CPR (1-KM),1-KM,KM revision %
+Total ankle,Demographics source,"Tables A4 (diagnosis) and A5 (age, gender), PDF p. 8",Section 3.A.1 text p. 25 (60.6% men),Table A004 p. 148
+Total ankle,"3-yr revision, registry mean % (95% CI)",5.04 (4.36–5.73),2.97 (2.64–3.34),4.16 (3.02–5.30)
+Total ankle,"Procedures behind the mean, n","5,379","11,321","1,460"
+Total ankle,Mean source,"A11 all diagnoses pooled (n = 5,379 = A15 population) [A11]",3.A3 All cases [3.A3],A014B all primary ankles (n from caption) [A014B]
+Total ankle,Models with a 3-yr estimate,13,10,0 (registry mean only)
+Total ankle,Publishes outlier list (2025),"yes (UKA: 8 combinations, all no longer used; ankle: 2; elbow: none)",yes (knee Level 1 outliers; no UKA brand; no ankle/elbow list),no (2025 report)
+Total elbow,Country,Australia,"England, Wales, Northern Ireland, Isle of Man, Guernsey",Netherlands
+Total elbow,Report,2025 Demographics and Outcome of Elbow and Wrist Arthroplasty Supplementary Report,22nd Annual Report 2025 (Elbows),Online annual report 2025
+Total elbow,Data period,to 2024-12-31,2012-04-01 to 2024-12-31,2014-01-01 to 2024-12-31
+Total elbow,National coverage (%),99,100,100
+Total elbow,"Primary procedures, n","1,979 ¹","4,740 ¹",73 ¹
+Total elbow,"Age, years, mean (SD)",70.8 (12.2),NR,67.5 (11.9)
+Total elbow,"Female, %",74.9,74.4,75
+Total elbow,"Osteoarthritis, %",33.2,NR,21
+Total elbow,Revision metric,CPR (1-KM),1-KM,KM revision %
+Total elbow,Demographics source,"Tables ET3 (age, gender) and ET4 (diagnosis), PDF p. 16",Table 3.E7 pp. 45-46 (n by sex); all-elbow age: p. 25,Table E004 p. 218
+Total elbow,"3-yr revision, registry mean % (95% CI)",8.91 (7.52–10.30),4.76 (4.10–5.43),6.90
+Total elbow,"Procedures behind the mean, n","1,881","4,740",666
+Total elbow,Mean source,ET9 total elbow: fracture + OA + RA pooled [ET9],3.E6 total elbow: acute trauma + elective pooled [3.E6],de-identified LROI total-elbow data set (Mean row; no CI)
+Total elbow,Models with a 3-yr estimate,4,5,5
+Total elbow,Publishes outlier list (2025),"yes (UKA: 8 combinations, all no longer used; ankle: 2; elbow: none)",yes (knee Level 1 outliers; no UKA brand; no ankle/elbow list),no (2025 report)

@@ -1,0 +1,10 @@
+registry,label,detail_level,n_total,p,wald,exact,joint,model,ref
+AOANJRR,Sigma HP,1,2015,0.03,below 95%,below 99.8%,UKA,NA,NA
+EPRD,Journey [2],1,3588,0.0691354515050167,above 99.8%,above 95%,UKA,NA,NA
+EPRD,Journey · cemented [2],2,3588,0.0691354515050167,above 99.8%,above 95%,UKA,NA,NA
+AOANJRR,NA,NA,501,0.02,below 95%,below 99.8%,ANKLE,Trabecular Metal,min_loo_re
+NJR,NA,NA,541,0.0175,below 90%,within 90%,ANKLE,Infinity / Inbone,pub
+NJR,NA,NA,1134,0.0457,above 99.8%,above 95%,ANKLE,Mobility,pub
+LROI,NA,NA,240,0.095,within 90%,above 90%,ELBOW,LROI elbow 1,pub
+LROI,NA,NA,240,0.095,above 99.8%,above 95%,ELBOW,LROI elbow 1,min_loo_re
+LROI,NA,NA,184,0.038,below 90%,within 90%,ELBOW,LROI elbow 2,pub

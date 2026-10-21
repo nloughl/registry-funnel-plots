@@ -1,0 +1,17 @@
+Set,Models,Limit,High flags observed,High flags expected by chance
+UKA L1,49,95%,15,1.23
+UKA L1,49,99.8%,12,0.05
+UKA L2,29,95%,12,0.73
+UKA L2,29,99.8%,9,0.03
+Total ankle lowest LOO mean,23,90%,7,1.15
+Total ankle lowest LOO mean,23,95%,6,0.58
+Total ankle lowest LOO mean,23,99.8%,4,0.02
+Total ankle published mean,23,90%,7,1.15
+Total ankle published mean,23,95%,6,0.58
+Total ankle published mean,23,99.8%,3,0.02
+Total elbow lowest LOO mean,14,90%,3,0.7
+Total elbow lowest LOO mean,14,95%,3,0.35
+Total elbow lowest LOO mean,14,99.8%,2,0.01
+Total elbow published mean,14,90%,1,0.7
+Total elbow published mean,14,95%,1,0.35
+Total elbow published mean,14,99.8%,1,0.01

@@ -1,0 +1,58 @@
+Joint,Registry,Agreement,Our model,Registry-listed implant,Registry flag,Registry status,Our flag,n,Our 3-yr %,Registry mean %,Registry source
+Unicompartmental knee,SIRIS,Both flag,Journey,Journey Uni,▲ worse,active outlier (long-term evaluation; 2-yr rate below the alert boundary),▲ 99.8%,"1,128",8.90,5.70,"Figure 5.37 p. 179; outlier watch list p. 195 (2-yr evaluation: no outlier, Figure 5.36 p. 177)"
+Unicompartmental knee,SIRIS,Both flag,Allegretto,Allegretto,▼ better,below-average long-term revision (one surgical unit),▼ 99.8%,"1,074",1.70,5.70,Figure 5.38 p. 179
+Unicompartmental knee,AOANJRR,Funnel only,Journey [2],–,–,–,▲ 95%,"2,071",5.40,4.40,–
+Unicompartmental knee,AOANJRR,Funnel only,Oxford [3],–,–,–,▲ 99.8%,"24,745",5.21,4.40,–
+Unicompartmental knee,AOANJRR,Funnel only,Triathlon,–,–,–,▲ 95%,386,6.80,4.40,–
+Unicompartmental knee,AOANJRR,Funnel only,Persona,–,–,–,▼ 95%,"2,847",3.60,4.40,–
+Unicompartmental knee,AOANJRR,Funnel only,Restoris / Mako MCK,–,–,–,▼ 99.8%,"6,792",2.70,4.40,–
+Unicompartmental knee,AOANJRR,Funnel only,Sigma HP,–,–,–,▼ 95%,"2,015",3.00,4.40,–
+Unicompartmental knee,AOANJRR,Funnel only,ZUK / Physica ZUK,–,–,–,▼ 99.8%,"9,673",3.40,4.40,–
+Unicompartmental knee,NJR,Funnel only,AMC / Uniglide,–,–,–,▲ 99.8%,"2,761",6.16,3.21,–
+Unicompartmental knee,NJR,Funnel only,Preservation,–,–,–,▲ 99.8%,"1,419",8.27,3.21,–
+Unicompartmental knee,NJR,Funnel only,Persona,–,–,–,▼ 99.8%,"10,775",1.39,3.21,–
+Unicompartmental knee,NJR,Funnel only,Restoris / Mako MCK,–,–,–,▼ 99.8%,"4,281",1.43,3.21,–
+Unicompartmental knee,NJR,Funnel only,Sigma HP,–,–,–,▼ 99.8%,"18,298",2.38,3.21,–
+Unicompartmental knee,NJR,Funnel only,ZUK / Physica ZUK [2],–,–,–,▼ 99.8%,"36,792",1.54,3.21,–
+Unicompartmental knee,SIRIS,Funnel only,GMK Uni,–,–,–,▲ 99.8%,"1,852",7.50,5.70,–
+Unicompartmental knee,SIRIS,Funnel only,Persona,–,–,–,▼ 95%,"3,441",4.80,5.70,–
+Unicompartmental knee,SIRIS,Funnel only,Restoris / Mako MCK,–,–,–,▼ 99.8%,"1,080",3.00,5.70,–
+Unicompartmental knee,EPRD,Funnel only (no public list),Journey [2],–,–,–,▲ 99.8%,"3,588",6.91,5.70,–
+Unicompartmental knee,EPRD,Funnel only (no public list),Link Sled [2],–,–,–,▲ 99.8%,"2,080",7.97,5.70,–
+Unicompartmental knee,EPRD,Funnel only (no public list),Triathlon,–,–,–,▲ 99.8%,688,8.60,5.70,–
+Unicompartmental knee,EPRD,Funnel only (no public list),Univation,–,–,–,▲ 99.8%,"1,603",10.60,5.70,–
+Unicompartmental knee,EPRD,Funnel only (no public list),MOTO,–,–,–,▼ 99.8%,939,3.00,5.70,–
+Unicompartmental knee,EPRD,Funnel only (no public list),Persona,–,–,–,▼ 99.8%,"6,983",4.40,5.70,–
+Unicompartmental knee,EPRD,Funnel only (no public list),Restoris / Mako MCK,–,–,–,▼ 99.8%,"1,347",3.20,5.70,–
+Unicompartmental knee,EPRD,Funnel only (no public list),Sigma HP,–,–,–,▼ 95%,"5,181",4.80,5.70,–
+Unicompartmental knee,EPRD,Funnel only (no public list),ZUK / Physica ZUK,–,–,–,▼ 99.8%,"6,854",3.70,5.70,–
+Unicompartmental knee,LROI,Funnel only (no public list),Allegretto,–,–,–,▲ 99.8%,106,12.26,4.80,–
+Unicompartmental knee,LROI,Funnel only (no public list),BalanSys,–,–,–,▲ 99.8%,844,8.20,4.80,–
+Unicompartmental knee,LROI,Funnel only (no public list),Genesis Uni,–,–,–,▲ 99.8%,"1,244",9.05,4.80,–
+Unicompartmental knee,LROI,Funnel only (no public list),HLS Uni,–,–,–,▲ 95%,165,9.11,4.80,–
+Unicompartmental knee,LROI,Funnel only (no public list),Restoris / Mako MCK,–,–,–,▼ 99.8%,427,1.02,4.80,–
+Unicompartmental knee,LROI,Funnel only (no public list),ZUK / Physica ZUK,–,–,–,▼ 99.8%,"6,828",3.03,4.80,–
+Unicompartmental knee,AOANJRR,Not comparable,–,Advance/Advance,▲ worse,identified and no longer used,–,,,,"2025 Annual Report Tables IP16-IP17, pp. 693-694"
+Unicompartmental knee,AOANJRR,Not comparable,–,BalanSys Uni/BalanSys Uni Convex,▲ worse,identified and no longer used,–,,,,"Tables IP16-IP17, pp. 693-694 (combination not in KP17; the BalanSys in our data is BalanSys Uni/Uni Fixed)"
+Unicompartmental knee,AOANJRR,Not comparable,–,BalanSys Uni/BalanSys Uni Mobile,▲ worse,identified and no longer used,–,,,,"Tables IP16-IP17, pp. 693-694 (combination not in KP17; the BalanSys in our data is BalanSys Uni/Uni Fixed)"
+Unicompartmental knee,AOANJRR,Not comparable,–,Eius/Eius,▲ worse,identified and no longer used,–,,,,"Tables IP16-IP17, pp. 693-694"
+Unicompartmental knee,AOANJRR,Not comparable,–,Freedom PKR Active/Freedom PKR Active,▲ worse,identified and no longer used,–,,,,"Tables IP16-IP17, pp. 693-694"
+Unicompartmental knee,AOANJRR,Not comparable,–,GMK-UNI/GMK-UNI,▲ worse,identified and no longer used,–,,,,"Tables IP16-IP17, pp. 693-694"
+Unicompartmental knee,AOANJRR,Not comparable,–,Uniglide/Uniglide,▲ worse,identified and no longer used,–,,,,"Tables IP16-IP17, pp. 693-694"
+Unicompartmental knee,AOANJRR,Not comparable,–,Preservation Mobile (tibial component),▲ worse,identified and no longer used,–,,,,"Tables IP16-IP17, pp. 693-694"
+Total ankle,AOANJRR,Both flag,Hintermann Series H3,Hintermann Series H3/Hintermann Series H3,▲ worse,re-identified and still used,▲ 99.8%,573,8.40,5.04,"2025 Annual Report Tables IP31-IP32, p. 709; ankle supplement Table A15 footnote (PDF p. 15)"
+Total ankle,AOANJRR,Both flag,STAR,S.T.A.R/S.T.A.R,▲ worse,identified and no longer used,▲ 95%,49,12.60,5.04,"2025 Annual Report Tables IP31-IP32, p. 709"
+Total ankle,AOANJRR,Funnel only,Mobility,–,–,–,▲ 95%,568,7.10,5.04,–
+Total ankle,AOANJRR,Funnel only,Vantage,–,–,–,▲ 90%,193,7.70,5.04,–
+Total ankle,AOANJRR,Funnel only,Inbone,–,–,–,▼ 95%,400,2.80,5.04,–
+Total ankle,AOANJRR,Funnel only,Infinity,–,–,–,▼ 99.8%,"1,515",2.80,5.04,–
+Total ankle,AOANJRR,Funnel only,Trabecular Metal,–,–,–,▼ 99.8%,501,2.00,5.04,–
+Total ankle,NJR,Funnel only,BOX,–,–,–,▲ 95%,810,4.74,2.97,–
+Total ankle,NJR,Funnel only,Mobility,–,–,–,▲ 99.8%,"1,134",4.57,2.97,–
+Total ankle,NJR,Funnel only,Zenith,–,–,–,▲ 99.8%,"1,171",5.00,2.97,–
+Total ankle,NJR,Funnel only,Infinity,–,–,–,▼ 99.8%,"4,858",1.84,2.97,–
+Total ankle,NJR,Funnel only,Infinity / Inbone,–,–,–,▼ 90%,541,1.75,2.97,–
+Total ankle,NJR,Funnel only,Vantage,–,–,–,▼ 95%,318,0.41,2.97,–
+Total elbow,AOANJRR,Funnel only,Latitude [3 dx],–,–,–,▼ 95%,665,6.46,8.91,–
+Total elbow,NJR,Funnel only,Latitude / Latitude EV Stem,–,–,–,▲ 99.8%,240,10.58,4.76,–
+Total elbow,LROI,Funnel only (no public list),LROI elbow 2,–,–,–,▼ 90%,184,3.80,6.90,–

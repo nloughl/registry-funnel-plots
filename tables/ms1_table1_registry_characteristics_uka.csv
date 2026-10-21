@@ -1,0 +1,17 @@
+Characteristic,AOANJRR,NJR,EPRD,LROI,SIRIS
+Country,Australia,"England, Wales, Northern Ireland, Isle of Man, Guernsey",Germany,Netherlands,Switzerland
+Report,2025 Annual Report (Hip Knee & Shoulder),22nd Annual Report 2025 (Knees),Annual Report 2025,Online annual report 2025,SIRIS Report Hip and Knee 2025
+Data period,1999-09-01 to 2024-12-31,2003-04-01 to 2024-12-31,2012-11 to 2024-12-31,2007-01-01 to 2024-12-31,2012-09-01 to 2024-12-31
+National coverage (%),99,100,68,100,100
+"Primary procedures, n","78,219 ¹","186,163 ¹","78,265 ¹","8,808 ¹","20,037 ¹"
+"Age, years, mean (SD)",65.5 (9.8),64.5 (mean),64 (57-72)†,66.3 (8.6),64.8 (10.1)
+"Female, %",44.6,45.4,55,53,46.5
+"Osteoarthritis, %",99.1,NR,NR,98.4,89.6
+Revision metric,CPR (1-KM),1-KM,1-KM (CRR),CPR (1-KM),failure rate (KM)
+Demographics source,"Tables KP14 (diagnosis) and KP15 (age, gender), p. 426",Table 3.K3 p. 37 (mean age and % male per fixation group; pooled here n-weighted),"Table 57, pp. 124-125 (m/f 45/55; BMI 29.4; 708 hospitals)",Table K037 p. 100,Table 3.14 p. 47 (and section 3.3.3 p. 45)
+"3-yr revision, registry mean % (95% CI)",4.40 (4.20–4.60),3.21 (3.13–3.29),5.70 (5.50–5.80),4.80 (4.61–4.98),5.70 (5.50–6.00)
+"Procedures behind the mean, n","50,481","206,689","78,265","61,917","33,407"
+Model rows with a 3-yr estimate,12,15,17,10,11
+Models at detail level 1,9,10,11,9,10
+Models at detail level 2,3,1,13,10,2
+Publishes outlier list (2025),"yes (UKA: 8 combinations, all no longer used; ankle: 2; elbow: none)",yes (knee Level 1 outliers; no UKA brand; no ankle/elbow list),no,no (2025 report),yes (watch list; partial knee: Journey Uni active long-term outlier)

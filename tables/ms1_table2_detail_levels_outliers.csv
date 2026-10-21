@@ -1,0 +1,13 @@
+Detail level,Registry,Model rows reported,Rows with the detail,Models (points),Procedures retained,"High outliers, 95%","High outliers, 99.8%","Low outliers, 95%","Low outliers, 99.8%","Excess revisions, 99.8% outliers","Excess revisions, 95% outliers"
+1: brand,AOANJRR,12,12,9,"50,639 (100%)",3,1,4,2,199.7,229.7
+1: brand,NJR,15,15,10,"176,605 (100%)",2,2,4,4,153.3,153.3
+1: brand,EPRD,17,17,11,"75,950 (100%)",4,4,5,4,189.2,189.2
+1: brand,LROI,10,10,9,"57,007 (100%)",4,3,2,2,89.5,96.6
+1: brand,SIRIS,11,11,10,"31,971 (100%)",2,2,3,2,69.4,69.4
+1: brand,All registries,65,65,49,"392,172 (100%)",15,12,18,14,701.1,738.2
+2: brand + fixation,AOANJRR,12,3,3,"24,745 (49%)",2,1,0,0,178.8,189.2
+2: brand + fixation,NJR,15,1,1,"44,577 (25%)",0,0,1,1,0,0
+2: brand + fixation,EPRD,17,17,13,"75,950 (100%)",4,4,6,4,189.2,189.2
+2: brand + fixation,LROI,10,10,10,"57,007 (100%)",5,4,3,3,237.4,244.5
+2: brand + fixation,SIRIS,11,2,2,"8,024 (25%)",1,0,0,0,0,34.3
+2: brand + fixation,All registries,65,33,29,"210,303 (54%)",12,9,10,8,605.3,657.3

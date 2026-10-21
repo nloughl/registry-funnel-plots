@@ -1,0 +1,13 @@
+Joint,Registry,Published outlier,Direction,Registry status,"Our status (published mean, level 1 / model)",Our status (level 2),Source
+Unicompartmental knee,AOANJRR,Advance/Advance,high,identified and no longer used,brand not in model tables,,"2025 Annual Report Tables IP16-IP17, pp. 693-694"
+Unicompartmental knee,AOANJRR,BalanSys Uni/BalanSys Uni Convex,high,identified and no longer used,–,,"Tables IP16-IP17, pp. 693-694"
+Unicompartmental knee,AOANJRR,BalanSys Uni/BalanSys Uni Mobile,high,identified and no longer used,–,,"Tables IP16-IP17, pp. 693-694"
+Unicompartmental knee,AOANJRR,Eius/Eius,high,identified and no longer used,brand not in model tables,,"Tables IP16-IP17, pp. 693-694"
+Unicompartmental knee,AOANJRR,Freedom PKR Active/Freedom PKR Active,high,identified and no longer used,brand not in model tables,,"Tables IP16-IP17, pp. 693-694"
+Unicompartmental knee,AOANJRR,GMK-UNI/GMK-UNI,high,identified and no longer used,not in AOANJRR 3-yr model data,,"Tables IP16-IP17, pp. 693-694"
+Unicompartmental knee,AOANJRR,Uniglide/Uniglide,high,identified and no longer used,not in AOANJRR 3-yr model data,,"Tables IP16-IP17, pp. 693-694"
+Unicompartmental knee,AOANJRR,Preservation Mobile (tibial component),high,identified and no longer used,not in AOANJRR 3-yr model data,,"Tables IP16-IP17, pp. 693-694"
+Unicompartmental knee,SIRIS,Journey Uni,high,active outlier (long-term evaluation; 2-yr rate below the alert boundary),▲ 99.8%,,"Figure 5.37 p. 179; outlier watch list p. 195 (2-yr evaluation: no outlier, Figure 5.36 p. 177)"
+Unicompartmental knee,SIRIS,Allegretto,low,below-average long-term revision (one surgical unit),▼ 99.8%,,Figure 5.38 p. 179
+Total ankle,AOANJRR,Hintermann Series H3/Hintermann Series H3,high,re-identified and still used,▲ 99.8%,,"2025 Annual Report Tables IP31-IP32, p. 709; ankle supplement Table A15 footnote (PDF p. 15)"
+Total ankle,AOANJRR,S.T.A.R/S.T.A.R,high,identified and no longer used,▲ 95%,,"2025 Annual Report Tables IP31-IP32, p. 709"

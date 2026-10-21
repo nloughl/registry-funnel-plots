@@ -63,6 +63,7 @@ scale_linetype_level <- function(levels, name = "Control limit") {
   labs <- level_label(sort(unique(levels)))
   vals <- LEVEL_LINETYPES[labs]
   vals[is.na(vals)] <- "longdash"
+  if (length(labs) == 1) vals[] <- "solid"   # a single control limit is always drawn solid
   ggplot2::scale_linetype_manual(values = stats::setNames(unname(vals), labs), breaks = labs, name = name)
 }
 
