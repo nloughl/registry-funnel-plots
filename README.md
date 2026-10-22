@@ -199,6 +199,14 @@ These are read from the regextract outputs `outputs/ANKLE/` and `outputs/ELBOW/`
 
   Hover shows the model as printed, its diagnosis and its source table. There are CSV downloads.
 
+  **Leave-one-out in the app.** The same leave-one-out analysis as `loo_influence.Rmd` and the manuscript (`R/loo.R`: random-effects meta-analysis, REML with Knapp-Hartung, cloglog scale, registries with at least 3 models), run per joint and year and cached:
+  - **Funnel reference = Lowest leave-one-out mean:** each registry's funnel is centred on the lowest of its leave-one-out means (the model whose removal gives it is named in the note and the means table). It is the tightest reference, so it favours flagging. Registries without one (fewer than 3 models with rates, e.g. LROI) keep the published mean.
+  - **Leave a model out:** click a model on the funnel (or a dot in the Influence view), or pick it in the "Leave out of the mean" box above the plot. That registry's funnel moves to the mean without that model, the model gets a black square, and the funnel around the published mean stays as a grey line for comparison. One model per registry at a time; click it again, remove its chip or use Reset to put it back.
+  - **Leave-one-out mean:** random effects (default, as in the manuscript) or subtraction from the published total, (N p_pub - n_i p_i) / (N - n_i). It applies to both of the above.
+  - **Influence** (sub-tab next to Funnel): per registry, the mean recomputed without each model with its 95% CI, against the published mean (black) and the random-effects mean (blue dashed); the lowest is ringed in pink and dot size follows the model's share of the registry's procedures. The table gives n, share, model rate, mean without it, the change from the published mean, Cook's distance and metafor's influence flag (as in Supplementary Table S7).
+  - AOANJRR elbow per diagnosis: those stems are judged against their diagnosis's ET9 rate, so leave-one-out applies to the pooled view only.
+  - Needs the `metafor` package; without it the app runs as before and says so.
+
 ### Decisions (2026-10)
 - **Elbow = total elbow replacement only.** AOANJRR's supplement covers only total elbow. NJR radial head, distal humeral hemi and "unconfirmed" rows are dropped (`rare_scope()`).
 - **Registry means** are set in `config/rare_joint_means.csv`. Each is an n-weighted pool of the listed rows, with the CI pooled from the published CIs.
