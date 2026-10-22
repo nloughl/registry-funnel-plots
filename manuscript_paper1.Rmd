@@ -368,25 +368,27 @@ fig2b <- tidyr::crossing(lv = DLEVELS, cl = LEVELS) |>
 for (f in fig2b) { print(f$p); save_fig(f$p, f$slug, 13, 5.5) }
 ```
 
-```{r figure2c, fig.height = 6}
+## Figure 2c. Oxford by fixation (detail level 2) {#figure2c}
 
-fig2c <- tidyr::crossing(lv = DLEVELS, cl = LEVELS) |>
-  purrr::pmap(function(lv, cl) {
-    d <- uka[[paste0("L", lv)]] |> filter(brand == "Oxford") |>
-      mutate(brand = factor(brand, levels = top_brands$brand),
-             label = if (lv >= 2) paste(registry, as.character(fixation)) else as.character(registry))
-    cv <- inner_join(curves, distinct(d, registry, brand), by = "registry", relationship = "many-to-many")
-    p <- funnel_plot(cv, d, filter(means, registry %in% d$registry), levels = cl, y = "difference", x_log = TRUE,
-                     facet = "brand",
-                     label_filter = if (lv >= 2) NULL else rlang::quo(is_high(funnel_status, !!cl) | is_low(funnel_status, !!cl)),
-                     title = paste0("Oxford UKA by fixation, ", T_YR, "-year revision, detail level ", lv, ": ", level_label(cl), " control limits"),
-                     subtitle = paste0("Each registry's mean (all UKA) set to 0. ",
-                                       if (lv >= 2) "Labels: registry and fixation variant" else paste0("Labelled (registry): outside the ", level_label(cl), " limits")),
-                     caption = paste0("Limits: ", METHOD_NAME[M1], "."),
-                     x_lab = "Procedures (n, log scale)")
-    p <- p + ggplot2::facet_wrap(ggplot2::vars(fixation), nrow = 1)
-    list(p = p, slug = paste0("figure2c_uka_oxford", TOP_K, "_L", lv, "_", cl * 1000))
-  })
+Oxford is the most-used UKA brand in every registry. Here its level-2 variants are split by fixation, one panel per fixation, and each panel shows only the registries that report Oxford with that fixation. One control limit per figure.
+
+```{r figure2c, fig.height = 5.5}
+OX <- "Oxford"
+fig2c <- purrr::map(LEVELS, function(cl) {
+  d <- uka$L2 |> filter(brand == OX) |>
+    mutate(label = paste(registry, as.character(fixation)),
+           fixation = factor(fixation, levels = intersect(FIX_ORDER, unique(fixation))))
+  cv <- inner_join(curves, distinct(d, registry, fixation), by = "registry", relationship = "many-to-many")
+  p <- funnel_plot(cv, d, filter(means, registry %in% d$registry), levels = cl, y = "difference", x_log = TRUE,
+                   facet = "fixation", label_filter = NULL,
+                   title = paste0("Oxford UKA by fixation, ", T_YR, "-year revision, detail level 2: ", level_label(cl), " control limits"),
+                   subtitle = "Each registry's mean (all UKA) set to 0. Labels: registry and fixation variant",
+                   caption = paste0("Limits: ", METHOD_NAME[M1], ". Source: 2025 annual reports of ",
+                                    paste(sort(unique(d$registry)), collapse = ", "), "."),
+                   x_lab = "Procedures (n, log scale)")
+  p <- p + ggplot2::facet_wrap(ggplot2::vars(fixation), nrow = 1)
+  list(p = p, slug = paste0("figure2c_uka_oxford_fixation_L2_", cl * 1000))
+})
 for (f in fig2c) { print(f$p); save_fig(f$p, f$slug, 13, 5.5) }
 ```
 
@@ -493,44 +495,238 @@ t4 <- bind_rows(t4_pub, t4_ours) |>
             `Registry mean %` = ifelse(is.na(p_ref), "", pp(p_ref)),
             `Registry source` = dplyr::coalesce(source, "–"))
 names(t4) <- sub("${T_YR}", T_YR, names(t4), fixed = TRUE)
-kbl(t4, caption = paste0("Table 4. Implants flagged by the registries' own 2025 outlier reports and by our funnels (UKA: level 1 at ",
-                         level_label(FLAG_UKA), "; ankle/elbow: published mean at ", level_label(FLAG_RARE), ")"))
-save_tab(t4, "table4_agreement_registry_vs_funnel")
+save_tab(t4, "tableS4_agreement_detail")
 
-t4_sum <- bind_rows(t4_pub, t4_ours) |>
-  mutate(Joint = JOINT_NAME[joint]) |>
-  count(Joint, Registry = registry, agreement) |>
-  tidyr::pivot_wider(names_from = agreement, values_from = n, values_fill = 0)
-for (a in AGREE_LEVELS) if (!a %in% names(t4_sum)) t4_sum[[a]] <- 0L
-t4_sum <- t4_sum |> select(Joint, Registry, all_of(AGREE_LEVELS)) |>
-  mutate(`Publishes a list (2025)` = ifelse(publishes(Registry), "yes", "no"), .after = Registry)
-kbl(t4_sum, caption = "Table 4 summary: number of implants per agreement category")
-save_tab(t4_sum, "table4_agreement_summary")
+# compact Table 4: one row per joint x registry, model names listed under each agreement category
+both_all <- bind_rows(t4_pub, t4_ours) |>
+  mutate(name = dplyr::case_when(
+           agreement == "Not comparable" ~ published_name,
+           TRUE ~ paste0(dplyr::coalesce(model, published_name), " ",
+                         ifelse(dplyr::coalesce(flag, direction) %in% "high", "▲",
+                                ifelse(dplyr::coalesce(flag, direction) %in% "low", "▼", ""))))) |>
+  mutate(agreement = factor(agreement, levels = AGREE_LEVELS))
+t4c <- both_all |>
+  group_by(joint, registry, agreement) |>
+  summarise(models = paste(sort(unique(name)), collapse = "; "), .groups = "drop") |>
+  tidyr::pivot_wider(names_from = agreement, values_from = models, values_fill = "")
+for (a in AGREE_LEVELS) if (!a %in% names(t4c)) t4c[[a]] <- ""
+t4c <- t4c |>
+  mutate(`Funnel only` = ifelse(`Funnel only (no public list)` != "", `Funnel only (no public list)`, `Funnel only`),
+         `Publishes a list (2025)` = ifelse(publishes(registry), "yes", "no"),
+         joint = factor(joint, levels = c("UKA", "ANKLE", "ELBOW"))) |>
+  arrange(joint, registry) |>
+  transmute(Joint = JOINT_NAME[as.character(joint)], Registry = registry, `Publishes a list (2025)`,
+            `Flagged by both` = `Both flag`, `Registry only` = `Registry only`, `Funnel only` = `Funnel only`,
+            `Registry-listed, not in our model data` = `Not comparable`)
+kbl(t4c, caption = paste0("Table 4. Implants flagged by both the registry's own 2025 outlier report and our funnels, or by one only (▲ worse, ▼ better than the registry mean; our flags: UKA level 1 at ",
+                          level_label(FLAG_UKA), ", ankle/elbow published mean at ", level_label(FLAG_RARE), "). Full detail: Supplementary Table S4."))
+save_tab(t4c, "table4_agreement_compact")
 ```
 
-**Reading Table 4.** AOANJRR's UKA list (Tables IP16–IP17) contains only combinations that are no longer used, so none of them appears in the modern-prosthesis table (KP17) used for the funnels. A brand match (e.g. BalanSys, GMK Uni, Uniglide, Preservation) therefore compares a different, still-used combination of the same brand. SIRIS flags Journey Uni on long-term (5–12 year) revision and not at 2 years. Our 3-year screen sits between these two time frames. NJR's Level 1 list (Table 5.4) contains no UKA brand, and EPRD and LROI publish no list.
+```{r t4_text, include = FALSE}
+cnt <- function(a, j = NULL) sum(both_all$agreement == a & (is.null(j) | both_all$joint %in% j))
+reg_list <- filter(both_all, !agreement %in% c("Funnel only", "Funnel only (no public list)"))
+n_pub <- nrow(reg_list); n_pub_comp <- sum(reg_list$agreement != "Not comparable")
+both_txt <- both_all |> filter(agreement == "Both flag") |>
+  mutate(t = sprintf("%s (%s, %s)", sub(" [▲▼]$", "", name), registry, tolower(JOINT_NAME[joint]))) |> pull(t)
+pub_regs_flags <- both_all |> filter(agreement == "Funnel only")
+nopub_flags <- both_all |> filter(agreement == "Funnel only (no public list)")
+```
+
+**Congruency with the registries' own outlier reports.**
+
+* **What the registries published.** They listed `r n_pub` implants as outliers. `r n_pub - n_pub_comp` of them (all AOANJRR UKA combinations no longer in use) are not in the model tables our funnels use, so they cannot be compared.
+* **Agreement.** Of the `r n_pub_comp` comparable implants, all `r cnt("Both flag")` were also flagged by our funnels in the same direction: `r paste(both_txt, collapse = "; ")`. None was missed (`r cnt("Registry only")` "registry only").
+* **What our funnels found beyond the registry lists.** They flagged `r nrow(pub_regs_flags)` models in registries that publish a list but do not list these models: `r sum(grepl("▲", pub_regs_flags$name))` worse and `r sum(grepl("▼", pub_regs_flags$name))` better than the registry mean. A further `r nrow(nopub_flags)` models were flagged in registries without a public list (EPRD and LROI).
+* **Why the extra flags are expected.** Registry lists use stricter thresholds (e.g. twice the class revision rate plus statistical significance, or the lower CI above twice the average), different metrics (revisions per 100 component-years, 2-year or long-term rates) and expert review. A funnel at 95% is a screening threshold. It flags smaller deviations, and also flags better-than-average models, which most registries do not report.
+
+These comparisons describe concordance between methods. The registries' lists are not a ground truth.
+
+
+**Notes on Table 4.** AOANJRR's UKA list (Tables IP16–IP17) contains only combinations that are no longer used, so none of them appears in the modern-prosthesis table (KP17) used for the funnels. A brand match (e.g. BalanSys, GMK Uni, Uniglide, Preservation) therefore compares a different, still-used combination of the same brand. SIRIS flags Journey Uni on long-term (5–12 year) revision and not at 2 years. Our 3-year screen sits between these two time frames. NJR's Level 1 list (Table 5.4) contains no UKA brand, and EPRD and LROI publish no list.
 
 **NJR red/green highlighting.** The NJR colours cells in its Kaplan-Meier brand tables. A construct is green when its 10-year revision is < 5% and red when it is ≥ 5%. Cells are left uncoloured when the CI spans 5% or fewer than 250 remain at risk. The rule is stated for **total knee replacement constructs only** (notes to Tables 3.K7 and 3.K9, pp. 63–92). The unicondylar rows in Table 3.K8 (p. 71) and Table 3.K9(a) (p. 78) are not coloured, and the ankle (3.A4) and elbow (3.E8) tables have no colour coding. So it cannot be used to check our UKA, ankle or elbow flags. It is also an absolute benchmark (fixed 10-year threshold), not a comparison with the registry mean. It would fit Paper 2 if TKA or THA are added, or a supplementary comparison using a UKA-appropriate 10-year benchmark (e.g. ODEP).
 
+# Validation: known poor and known good implants {#validation}
+
+The framework is applied unchanged to implants whose performance is known:
+
+* **Positive control: ASR.** It was recalled in 2010 and is flagged by AOANJRR and NJR. The resurfacing (ASR) and large-head total hip (ASR XL) versions are both checked, in both registries, each against its own class.
+* **Negative control: BHR.** Birmingham Hip Resurfacing is a well-performing resurfacing design.
+
+Within each class the reference is the registry's published class rate. These classes are poor performers themselves (metal-on-metal), so this is a demanding test. Where the published class rate includes the control implant, the subtraction leave-one-out reference is also shown. Limits: `r METHOD_NAME[M1]`, `r paste(level_label(LEVELS), collapse = " and ")`.
+
+```{r validation}
+vc <- readr::read_csv("config/manuscript/validation_controls.csv", comment = "#", show_col_types = FALSE)
+vref <- vc |> filter(role == "reference") |>
+  group_by(registry, class) |>
+  summarise(p_ref = pool(estimate / 100, n_total), N = sum(n_total),
+            ci = list(pool_ci(estimate, lcl, ucl, n_total)), includes = first(ref_includes_model),
+            ref_source = paste(unique(source), collapse = "; "), .groups = "drop") |>
+  mutate(p_lcl = purrr::map_dbl(ci, 1), p_ucl = purrr::map_dbl(ci, 2)) |> select(-ci)
+vpts <- vc |> filter(role != "reference") |>
+  left_join(vref, by = c("registry", "class")) |>
+  mutate(p = estimate / 100,
+         p_loo = ifelse(includes == "yes", (N * p_ref - n_total * p) / (N - n_total), NA_real_))
+lim_at <- function(p0, n, lv, side) purrr::map2_dbl(p0, n, ~ funnel_limits(.x, .y, lv, M1)[[side]])
+vtab <- tidyr::crossing(vpts, ref_type = c("published", "leave-one-out")) |>
+  filter(ref_type == "published" | !is.na(p_loo)) |>
+  mutate(p0 = ifelse(ref_type == "published", p_ref, p_loo),
+         up95 = lim_at(p0, n_total, 0.95, "upper"), up998 = lim_at(p0, n_total, 0.998, "upper"),
+         lo95 = lim_at(p0, n_total, 0.95, "lower"), lo998 = lim_at(p0, n_total, 0.998, "lower"),
+         status = dplyr::case_when(p > up998 ~ "above 99.8%", p > up95 ~ "above 95%",
+                                   p < lo998 ~ "below 99.8%", p < lo95 ~ "below 95%", TRUE ~ "within 95%"),
+         expected = ifelse(role == "positive", "above", "not above"),
+         as_expected = ifelse(role == "positive", startsWith(status, "above"), !startsWith(status, "above")))
+vshow <- vtab |>
+  arrange(desc(role), registry, class, desc(ref_type)) |>
+  transmute(Control = ifelse(role == "positive", "Known poor (positive)", "Known good (negative)"),
+            Registry = registry, Class = class, Implant = model, n = cm(n_total), `3-yr %` = pp(p, 0.01),
+            Reference = ref_type, `Reference %` = pp(p0, 0.01),
+            `Upper 95% / 99.8% limit %` = sprintf("%s / %s", pp(up95), pp(up998)),
+            Status = arrow(status), `As expected` = ifelse(as_expected, "yes", "no"), Source = source)
+kbl(vshow, caption = paste0("Table 7. Positive (ASR) and negative (BHR) controls, ", T_YR, "-year revision against each registry's class rate"))
+save_tab(vshow, "table7_validation_controls")
+save_tab(transmute(vref, registry, class, reference_pct = pp(p_ref), n = N, includes_control = includes, source = ref_source),
+         "table7_validation_references")
+```
+
+```{r validation_fig, fig.height = 6}
+vcurves <- build_limit_curves(transmute(vref, registry, class, p_ref, n_max = max(vpts$n_total) * 3), LEVELS, M1, n_min = 300)
+vp <- vtab |> filter(ref_type == "published") |>
+  transmute(registry, class, n_total, p, p_ref = p0, dev = p - p0, ratio = p / p0,
+            label = paste0(ifelse(grepl("(ASR XL)", model, fixed = TRUE), "ASR XL", sub(" \\(.*", "", model)),
+                           ifelse(role == "positive", " (+)", " (−)")))
+vfig <- purrr::map(LEVELS, function(cl) {
+  funnel_plot(vcurves, vp, NULL, levels = cl, y = "difference", x_log = TRUE, facet = "class",
+              colour_scale = ggplot2::scale_colour_manual(values = registry_colour(unique(vp$registry)), name = "Registry"),
+              title = paste0("Validation: ASR (+, known poor) and BHR (−, known good), ", T_YR, "-year revision, ", level_label(cl), " control limits"),
+              subtitle = "Each panel: implant class; each registry's published class rate set to 0",
+              caption = paste0("Limits: ", METHOD_NAME[M1], ". Sources: AOANJRR 2025 Annual Report and supplements; NJR 22nd Annual Report 2025 (Hips)."),
+              x_lab = "Procedures (n, log scale)") +
+    ggplot2::facet_wrap(ggplot2::vars(class), nrow = 1, scales = "free_y")
+})
+for (i in seq_along(vfig)) { print(vfig[[i]]); save_fig(vfig[[i]], paste0("figure4_validation_", LEVELS[i] * 1000), 13, 5.5) }
+```
+
+```{r validation_text, include = FALSE}
+pos <- filter(vtab, role == "positive", ref_type == "published"); neg <- filter(vtab, role == "negative", ref_type == "published")
+```
+
+**Result.**
+
+* **ASR (positive control).** It was above the 99.8% upper limit in `r sum(pos$status == "above 99.8%")` of `r nrow(pos)` registry–class comparisons against the published class rate. The leave-one-out references give the same result.
+* **BHR (negative control).** It was not above the upper limit in any of `r nrow(neg)` comparisons. `r sum(startsWith(neg$status, "below"))` of the BHR comparisons fall below the lower limit, i.e. BHR does better than its class.
+* **Caution for large-head total hips.** The BHR cup used in large-head total hip replacement does better than other metal-on-metal hips. Against all conventional total hips, however, AOANJRR lists it as having a higher than anticipated rate of revision (Tables IP7–IP8). The resurfacing BHR is therefore the cleaner negative control.
+
+## Supplementary: NexGen Stemmed Option Tibia (ratio funnel)
+
+The NexGen Stemmed Option Tibia was recalled in 2022 after the NJR identified it. No cumulative revision rates are published for it, so it is shown as a positive control on an indirectly standardised (observed/expected) funnel (Spiegelhalter 2005). The limits are 1 ± z/√E, where E is the expected number of revisions, back-calculated from the published CI. Inputs: NJR Variant Report ratios, as published in the manufacturer's field safety notice and the MHRA alert.
+
+```{r nexgen, fig.height = 5}
+ng <- readr::read_csv("config/manuscript/validation_nexgen_rrr.csv", comment = "#", show_col_types = FALSE) |>
+  mutate(se_log = (log(ucl) - log(lcl)) / (2 * qnorm(0.975)), O = 1 / se_log^2, E = O / rrr,
+         up95 = 1 + qnorm(0.975) / sqrt(E), up998 = 1 + qnorm(0.999) / sqrt(E),
+         status = dplyr::case_when(rrr > up998 ~ "above 99.8%", rrr > up95 ~ "above 95%", TRUE ~ "within 95%"))
+kbl(transmute(ng, Variant = variant, Comparator = comparator, n = cm(n_total), `O/E (95% CI)` = sprintf("%.2f (%.2f–%.2f)", rrr, lcl, ucl),
+              `Expected revisions (derived)` = round(E), `Upper 95% / 99.8% limit` = sprintf("%.2f / %.2f", up95, up998),
+              Status = arrow(status), Source = source),
+    caption = "Supplementary Table S5. NexGen Stemmed Option Tibia on an observed/expected funnel")
+save_tab(ng, "tableS5_validation_nexgen")
+egrid <- tibble(E = 10^seq(log10(20), log10(2000), length.out = 200))
+ngc <- tidyr::crossing(egrid, level = LEVELS) |>
+  mutate(upper = 1 + qnorm(1 - (1 - level) / 2) / sqrt(E), lower = pmax(0, 1 - qnorm(1 - (1 - level) / 2) / sqrt(E)),
+         level_lab = level_label(level))
+pn <- ggplot(ngc, aes(E)) +
+  geom_line(aes(y = upper, linetype = level_lab)) + geom_line(aes(y = lower, linetype = level_lab)) +
+  geom_hline(yintercept = 1) +
+  geom_pointrange(data = ng, aes(x = E, y = rrr, ymin = lcl, ymax = ucl, colour = comparator), position = position_dodge(width = 0.04)) +
+  ggrepel::geom_text_repel(data = ng, aes(x = E, y = rrr, label = sub("NexGen Stemmed Option \\+ ", "", variant), colour = comparator),
+                           size = 3, seed = 1, show.legend = FALSE) +
+  scale_x_log10() + scale_linetype_level(LEVELS) +
+  labs(x = "Expected revisions (log scale)", y = "Observed / expected revisions", colour = "Comparator",
+       title = "NexGen Stemmed Option Tibia: observed/expected revision against funnel limits",
+       caption = "O/E from the NJR Variant Report (March 2022) via the manufacturer's notice and MHRA alert; E back-calculated from the CI.") +
+  theme_funnel()
+print(pn); save_fig(pn, "figureS_validation_nexgen", 10, 5)
+```
+
 # Rare joints: total ankle and total elbow {#rare}
 
-## Registry means, number of models and the leave-one-out means
+## Where the leave-one-out results go in the manuscript
+
+| Output | Place | Why |
+|---|---|---|
+| Methods text (meta-analysis settings, SE sources, choice of the lowest LOO mean) | Main text, methods | Needed to reproduce the reference |
+| Figure 3 (rare-joint funnels, published vs lowest LOO mean) | Main text | Shows the correction |
+| Table 5 (each rare-joint model under each reference and limit) | Main text | The result of the correction; already gives the lowest LOO mean per registry |
+| Supplementary Table S6 (registry-level meta-analysis and LOO summary) | Supplement | Heterogeneity, CIs and which model was left out; supports Table 5 |
+| Supplementary Table S7 (model-level LOO and influence diagnostics) | Supplement | Shows which model drives each mean, so the correction is justified |
+| Flag counts per reference and limit (Table 5b), rare-joint excess revisions | Results text | A few numbers; no table needed |
+| Table 6 (low-volume and LOO criteria) | Main text if within the table limit, otherwise supplement | The methodological argument for when to apply the corrections |
+
+## Supplementary Table S6. Random-effects meta-analysis and leave-one-out means per registry {#tableS6}
 
 ```{r rare_loo}
-rl <- purrr::map_dfr(runs, function(r) r$summary) |>
+lo_ci <- purrr::map_dfr(runs, ~ .x$models) |>
+  group_by(registry, joint) |>
+  slice_min(loo_re, n = 1, with_ties = FALSE) |>
+  ungroup() |>
+  select(joint, registry, loo_min_lb = loo_re_lb, loo_min_ub = loo_re_ub)
+ci_txt <- function(est, lb, ub) ifelse(is.na(lb), pp(est), sprintf("%s (%s–%s)", pp(est), pp(lb), pp(ub)))
+rl_raw <- purrr::map_dfr(runs, function(r) r$summary) |> left_join(lo_ci, by = c("joint", "registry"))
+rl <- rl_raw |>
   transmute(Joint = JOINT_NAME[joint], Registry = registry, `Models (k)` = k,
-            `Procedures (N)` = cm(N), `Published mean %` = pp(p_pub),
-            `Random-effects mean %` = pp(p_re),
-            `Leave-one-out means, range %` = sprintf("%s–%s", pp(loo_re_min), pp(loo_re_max)),
-            `Lowest leave-one-out mean %` = pp(loo_re_min), `Model left out for the lowest mean` = drop_for_min_re,
-            `Largest model` = top_model, `Largest model's share of N` = pct(top_share, 1),
-            `Mean shift, lowest LOO − published (pp)` = pp(loo_re_min - p_pub))
-kbl(rl, caption = paste0("Rare joints: published registry means and leave-one-out means (", T_YR, "-year revision; random-effects meta-analysis, ", P$loo_scale, " scale)"))
-save_tab(rl, "rare_loo_means")
+            `Procedures (N)` = cm(N),
+            `Published mean %` = pp(p_pub),
+            `Random-effects mean % (95% CI)` = ci_txt(p_re, p_re_lb, p_re_ub),
+            `95% prediction interval %` = sprintf("%s–%s", pp(pi_lb), pp(pi_ub)),
+            `τ²` = formatC(tau2, digits = 3, format = "f"),
+            `Q (df), p` = sprintf("%.1f (%d), %s", QE, k - 1L, format.pval(QEp, digits = 2, eps = 0.001)),
+            `I² %` = sprintf("%.0f", I2),
+            `LOO means, range %` = sprintf("%s–%s", pp(loo_re_min), pp(loo_re_max)),
+            `Lowest LOO mean % (95% CI)` = ci_txt(loo_re_min, loo_min_lb, loo_min_ub),
+            `Model left out for the lowest mean` = drop_for_min_re,
+            `Largest model (share of N)` = sprintf("%s (%s)", top_model, pct(top_share, 1)),
+            `Shift, lowest LOO − published (pp)` = pp(loo_re_min - p_pub))
+kbl(rl, caption = paste0("Supplementary Table S6. Rare joints: random-effects meta-analysis of the model-level ", T_YR,
+                         "-year revision rates and leave-one-out (LOO) means per registry (REML, Knapp–Hartung, ",
+                         P$loo_scale, " scale, back-transformed to %)"))
+save_tab(rl, "tableS6_loo_registry")
 skipped_txt <- purrr::imap_chr(runs, ~ paste(.x$skipped, collapse = ", "))
 ```
 
 Registries with fewer than `r P$loo_k_min` models, or no model-level data, have no leave-one-out mean: `r paste(sprintf("%s: %s", JOINT_NAME[names(skipped_txt)], ifelse(skipped_txt == "", "none", skipped_txt)), collapse = "; ")`.
+
+**Reading Table S6.**
+
+* **Published vs random-effects mean.** They are different quantities. The published mean weights models by procedures. The random-effects mean is closer to an average of models, so small models count for more than their n. The funnel reference after the correction is a random-effects mean with one model left out, not the published mean minus that model.
+* **I².** With registry-sized samples the sampling variances are small, so I² is high almost regardless of how much the models truly differ. τ² and the prediction interval are the interpretable measures of between-model spread.
+* **Lowest LOO mean.** Taking the lowest of the k LOO means is deliberately conservative: it is the tightest reference, which favours flagging. The LOO range shows how much each verdict depends on that choice.
+
+## Supplementary Table S7. Leave-one-out and influence diagnostics per model {#tableS7}
+
+```{r rare_influence}
+infl <- purrr::map_dfr(runs, ~ .x$models) |>
+  left_join(select(rl_raw, joint, registry, drop_for_min_re), by = c("joint", "registry")) |>
+  arrange(factor(joint, levels = c("ANKLE", "ELBOW")), registry, desc(n_total))
+s7 <- infl |>
+  transmute(Joint = JOINT_NAME[joint], Registry = registry, Model = model, n = cm(n_total),
+            `Model %` = pp(p), `Share of N` = pct(share_n, 1), `RE weight` = pct(w_re, 1),
+            `LOO mean without the model % (95% CI)` = ci_txt(loo_re, loo_re_lb, loo_re_ub),
+            `τ² without the model` = formatC(tau2_without, digits = 3, format = "f"),
+            `Studentised deleted residual` = sprintf("%.2f", rstudent),
+            `Cook's distance` = sprintf("%.2f", cook_d),
+            `Hat` = sprintf("%.2f", hat),
+            `Influential` = ifelse(influential, "yes", "no"),
+            `Left out for the lowest mean` = ifelse(model == drop_for_min_re, "✓", ""),
+            `SE source` = se_source)
+kbl(s7, caption = paste0("Supplementary Table S7. Rare joints: leave-one-out mean and influence diagnostics for each model ",
+                         "(metafor::leave1out and influence; influential = metafor's criteria, Viechtbauer & Cheung 2010)"))
+save_tab(s7, "tableS7_loo_influence")
+```
+
+`r n_inf <- sum(infl$influential); n_drop_inf <- sum(infl$influential & infl$model == infl$drop_for_min_re); paste0("**Influence.** ", n_inf, " of ", nrow(infl), " models meet metafor's criteria for an influential study. ", n_drop_inf, " of the ", nrow(rl_raw), " models left out for the lowest mean are among them. A model can lower the mean when left out without being formally influential, because these criteria are designed for detecting single outlying studies in large meta-analyses, and k is small here (", min(rl_raw$k), "–", max(rl_raw$k), " models).")`
 
 ## Figure 3. Rare-joint funnels: standard limits, 90% limits and the lowest leave-one-out mean {#figure3}
 
